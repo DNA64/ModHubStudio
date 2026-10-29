@@ -1,13 +1,14 @@
 # Mod Hub Studio
 
-    WORK IN PROGRESS: This repository is still under development and is not ready for use.
+    WORK IN PROGRESS: 
+    This repository is still under development and is not ready for use. The old repository (https://classicmods.net/) still works, 
+    but I'm in the process of giving it a much needed update, along with some new surprises! - Stay tunned!
 
 Mod Hub Studio is a browser tool for Hakchi2 CE module and game authors. It checks an hmod against hakchi's own install rules, fixes common packaging mistakes, packs a proper `.hmod`, and publishes a Mod Hub repository: to your own GitHub Pages site, to any web host, or to a shared central repository by pull request.
 
 Everything runs in the browser. Your files go nowhere until you publish, and then only to GitHub.
 
-- Source: [github.com/DNA64/ModHubStudio](https://github.com/DNA64/ModHubStudio)
-- Central repository: [MMC Central Repository for Hakchi2 CE](https://github.com/DNA64/ModHubRepo), the default place Mod Hub Studio submits packages to. Hakchi2 CE users add `https://dna64.github.io/ModHubRepo` as a Mod Hub repository.
+- [MMC Central Repository for Hakchi2 CE](https://github.com/DNA64/ModHubRepo), the default repository Mod Hub Studio submits packages to. Hakchi2 CE users add `https://dna64.github.io/ModHubRepo` as a Mod Hub repository. More details will be provided soon.
 
 ## Use it
 
