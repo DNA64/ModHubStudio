@@ -164,7 +164,7 @@ HOSTING.md
 
 ## Develop
 
-Requires Node.js 18.17 or newer.
+Requires Node.js 20 or newer (22 or higher recomended).
 
 ```
 npm install
