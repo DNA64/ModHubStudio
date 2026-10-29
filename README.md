@@ -1,5 +1,7 @@
 # Mod Hub Studio
 
+    WORK IN PROGRESS: This repository is still under development and is not ready for use.
+
 Mod Hub Studio is a browser tool for Hakchi2 CE module and game authors. It checks an hmod against hakchi's own install rules, fixes common packaging mistakes, packs a proper `.hmod`, and publishes a Mod Hub repository: to your own GitHub Pages site, to any web host, or to a shared central repository by pull request.
 
 Everything runs in the browser. Your files go nowhere until you publish, and then only to GitHub.
@@ -27,9 +29,9 @@ There are three ways to add packages on the Packages tab:
 
 Dragging a folder onto the page works out which of the last two it is.
 
-### Mod or game
+### Mod or Game/Port
 
-The contents decide whether a package is a mod or a game, the same evidence the consumers use:
+The contents decide whether a package is detected as a mod or a game:
 
 - **Game:** a `.desktop` file at the top level (Hakchi2 CE imports a `.clvg` by its `CLV-X-XXXXX.desktop`) and no system folders.
 - **Mod:** `install`, `uninstall` or `transfer`, or files under `bin`, `sbin`, `etc`, `lib`, `usr`, `root`.
