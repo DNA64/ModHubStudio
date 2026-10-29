@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+*.hmod binary
+*.clvg binary
+*.tgz binary
+*.gz binary
+*.tar binary
+*.zip binary
+*.png binary
+*.jpg binary

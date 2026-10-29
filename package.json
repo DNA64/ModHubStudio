@@ -1,0 +1,37 @@
+{
+  "name": "mod-hub-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mod Hub Studio: validate, pack and publish Hakchi2 CE modules (.hmod) and games (.clvg).",
+  "homepage": "https://github.com/DNA64/ModHubStudio",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DNA64/ModHubStudio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DNA64/ModHubStudio/issues"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "keywords": [
+    "hakchi",
+    "hakchi2-ce",
+    "hmod",
+    "snes-classic",
+    "nes-classic",
+    "mod-hub"
+  ],
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "spark-md5": "^3.0.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

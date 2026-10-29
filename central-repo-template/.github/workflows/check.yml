@@ -1,0 +1,50 @@
+name: Check packages
+
+# Runs Mod Hub Studio's rules on every pull request: the same hakchi
+# install checks the tool shows, plus version and maintainer rules.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # The publisher whose rules this repository enforces. Pin a tag or commit
+  # for repeatable results.
+  PUBLISHER_REPO: DNA64/ModHubStudio
+  PUBLISHER_REF: main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      - name: Check out the target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Check out the publisher
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PUBLISHER_REPO }}
+          ref: ${{ env.PUBLISHER_REF }}
+          path: publisher
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install the publisher
+        working-directory: publisher
+        run: npm ci --omit=dev
+
+      - name: Check the packages
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: node publisher/ci/check-pr.mjs --base base --head head --author "$AUTHOR" --summary "$GITHUB_STEP_SUMMARY"
