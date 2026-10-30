@@ -301,6 +301,16 @@ function FilesTab({ mod, update }) {
   );
 }
 
+// Hint text for the readme fields. Hakchi2 CE shows any field it doesn't use by name as "Field: value".
+const PLACEHOLDERS = {
+  Maintainer: 'optional',
+  Version: '1.0.0',
+  'Emulated System': 'optional',
+  Prerequisite: 'optional, e.g. RetroArch',
+  'Command Line': 'optional',
+  Tags: 'optional',
+};
+
 function ReadmeTab({ mod, update }) {
   const set = (k, v) => update({ ...mod, readme: { ...mod.readme, front: { ...mod.readme.front, [k]: v } } });
   const extra = Object.keys(mod.readme.front).filter((k) => !STANDARD_FIELDS.includes(k) && !MANAGED_FIELDS.includes(k));
@@ -312,7 +322,7 @@ function ReadmeTab({ mod, update }) {
             <label key={k} className="field">
               <span>{k}</span>
               <input id={`fm-${mod.id}-${k}`} value={mod.readme.front[k] || ''} list={k === 'Category' ? 'categories' : undefined}
-                placeholder={k === 'Name' ? mod.name : k === 'Version' ? '1.0.0' : k === 'Emulated System' ? 'optional' : k === 'Tags' ? 'optional' : ''}
+                placeholder={k === 'Name' ? mod.name : PLACEHOLDERS[k] || ''}
                 onChange={(e) => set(k, e.target.value)} />
             </label>
           ))}
