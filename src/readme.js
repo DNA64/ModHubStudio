@@ -6,7 +6,7 @@ export const STANDARD_FIELDS = ['Name', 'Creator', 'Maintainer', 'Category', 'Ve
 // Written by this tool from the Consoles setting; not edited as free text.
 export const MANAGED_FIELDS = ['Consoles'];
 export const REQUIRED_FIELDS = ['Name', 'Creator', 'Category', 'Version'];
-export const CATEGORIES = ['UI', 'Theme', 'Music', 'Emulator', 'Core', 'Tweak', 'Utility', 'Font', 'Module'];
+export const CATEGORIES = ['UI', 'Theme', 'Music', 'Emulator', 'Core', 'Games', 'Tweak', 'Utility', 'Font', 'Module'];
 
 export function parseReadme(text) {
   const raw = (text || '').replace(/^﻿/, '');
