@@ -9,6 +9,7 @@ import { createClient, parseRepoName } from './github.js';
 import { publishToPages, pagesUrl, pagesIssues } from './publish.js';
 import { prepareSubmission, submitToCentral } from './submit.js';
 import { CENTRAL_REPO, CENTRAL_TITLE, STUDIO_URL } from './project.js';
+import { isPackageId, suggestPackageId } from './packageid.js';
 
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
@@ -449,6 +450,12 @@ function SubmitItem({ mod, issues, central, github, notify, open }) {
             {' '}{prep.canPush ? 'Sent as a branch in the repository.' : `Sent from a fork in your account (${prep.me.login}/${central.repo}).`}
           </p>
           {prep.result.errors.length > 0 && <ul className="plain-issues">{prep.result.errors.map((t, i) => <li key={i} className="callout callout-error">{t}</li>)}</ul>}
+          {prep.result.approvals && prep.result.approvals.length > 0 && (
+            <div className="callout callout-ok small">
+              <strong>An admin will review this when merging:</strong>
+              <ul>{prep.result.approvals.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </div>
+          )}
           {prep.result.warnings.length > 0 && <ul className="plain-issues">{prep.result.warnings.map((t, i) => <li key={i} className="callout callout-warning">{t}</li>)}</ul>}
         </div>
       )}
@@ -524,7 +531,8 @@ function ConsolePicker({ mod, update }) {
 function ModView({ mod, update, remove, notify, goPublish }) {
   const [tab, setTab] = useState('checks');
   const issues = useMemo(() => validate(mod), [mod]);
-  const nameIssue = mod.kind !== 'game' && cleanName(mod.name) !== mod.name;
+  const idOk = isPackageId(mod.name);
+  const nameIssue = (mod.kind !== 'game' && cleanName(mod.name) !== mod.name) || !idOk;
   const tabs = [
     ['checks', 'Checks', <Counts key="c" issues={issues} compact />],
     ['files', 'Files', <span key="f" className="tab-count">{mod.files.length}</span>],
@@ -535,7 +543,7 @@ function ModView({ mod, update, remove, notify, goPublish }) {
     <section className="pane">
       <header className="pane-head">
         <div className="name-edit">
-          <label htmlFor={`name-${mod.id}`} className="eyebrow">{mod.kind === 'game' ? 'Game archive name' : 'Package name'}</label>
+          <label htmlFor={`name-${mod.id}`} className="eyebrow">Package ID</label>
           <div className="name-row">
             <input id={`name-${mod.id}`} className={`name-input ${nameIssue ? 'has-issue' : ''}`} value={mod.name}
               size={Math.max(6, mod.name.length + 1)} onChange={(e) => update({ ...mod, name: e.target.value })} spellCheck="false"
@@ -543,6 +551,12 @@ function ModView({ mod, update, remove, notify, goPublish }) {
             <span className="ext">{KINDS[mod.kind].ext}</span>
             <button className="btn btn-small btn-quiet rename-btn" onClick={() => { const el = document.getElementById(`name-${mod.id}`); el.focus(); el.select(); }}>Rename</button>
           </div>
+          {!idOk && (
+            <p className="muted small">
+              Not a Package ID yet (yourname.package, lowercase, no underscores). The central repository requires one.{' '}
+              <button className="linkish" onClick={() => update({ ...mod, name: suggestPackageId(mod) })}>Use {suggestPackageId(mod)}</button>
+            </p>
+          )}
           <p className="muted small">
             {mod.source?.example ? <span className="pill pill-example">Example</span> : null}{' '}
             From {mod.source?.fileName} · {mod.files.length} files · {fmtSize(totalSize(mod))}

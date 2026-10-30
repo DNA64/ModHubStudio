@@ -18,8 +18,8 @@ export function exampleMods() {
     ],
   });
   const music = makeMod({
-    name: 'menu_music_pack',
-    source: { kind: 'tgz', fileName: 'menu_music_pack.hmod', example: true, kindFrom: 'contents' },
+    name: 'you.menu-music-pack',
+    source: { kind: 'tgz', fileName: 'you.menu-music-pack.hmod', example: true, kindFrom: 'contents' },
     entries: [
       { path: 'readme.md', type: 'file', data: textBytes('---\nName: Menu Music Pack\nCreator: you\nCategory: Music\nVersion: 1.2.0\n---\nReplaces the home menu music with a random track from the pack at every boot.\n') },
       { path: 'install', type: 'file', data: textBytes('mkdir -p "$rootfs/usr/share/menu_music"\nreturn 0\n') },

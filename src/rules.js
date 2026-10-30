@@ -7,6 +7,7 @@ import { bytesText, textBytes } from './tar.js';
 import { REQUIRED_FIELDS } from './readme.js';
 import { extractReadme } from './model.js';
 import { validateTargets } from './targets.js';
+import { packageIdProblems, suggestPackageId } from './packageid.js';
 
 // Folders the hakchi rootfs overlay can actually place files into.
 export const OVERLAY_ROOTS = ['bin', 'sbin', 'etc', 'lib', 'usr', 'root'];
@@ -120,6 +121,7 @@ export const FIXES = {
     }) };
   },
   'bad-name': (mod) => ({ ...mod, name: cleanName(mod.name) }),
+  'package-id': (mod) => ({ ...mod, name: suggestPackageId(mod) }),
   'readme-top': (mod) => ({ ...mod, readmeProblem: null }),
   'nested-hmod': (mod) => ({ ...mod, files: mod.files.filter((f) => !/\.hmod(\/|$)/i.test(f.path)) }),
 };
@@ -154,6 +156,14 @@ export function validate(mod) {
         ? 'It has a top-level .desktop file and no system folders, which is a game. As a .hmod, hakchi would copy the game files into the console\'s root instead of adding a game. Packing here writes it as .clvg; switch it to Mod above if it really is a mod.'
         : 'It has system folders or install scripts, which is a mod. Hakchi2 CE would try to import it as a game and fail. Packing here writes it as .hmod; switch it to Game above if it really is a game.',
       mm.evidence);
+  }
+  const idProblems = packageIdProblems(mod.name);
+  if (idProblems.length) {
+    const ext = mod.kind === 'game' ? '.clvg' : '.hmod';
+    const suggestion = suggestPackageId(mod);
+    add('package-id', 'warning', 'Name isn\'t a Package ID',
+      `The file name is the package's permanent ID, written yourname.package (for example ${suggestion}${ext}). ${idProblems.join(' ')} The central repository only takes packages named this way; your own Mod Hub site doesn't require it.`,
+      [mod.name + ext], `Rename to ${suggestion}`);
   }
   if (mod.kind === 'game') return validateGame(mod, issues, add);
   if (mod.source?.kind === 'zip') {
