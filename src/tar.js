@@ -34,6 +34,7 @@ function readOctal(u8, off, len) {
 // Returns [{path, type: 'file'|'dir'|'symlink', data, mode, linkname}]
 export function parseTar(u8) {
   const entries = [];
+  const byPath = new Map();
   let off = 0;
   let longName = null;
   let paxPath = null;
@@ -65,8 +66,18 @@ export function parseTar(u8) {
     let type = 'file';
     if (typeflag === '5') type = 'dir';
     else if (typeflag === '2') type = 'symlink';
-    else if (typeflag !== '0' && typeflag !== '\0' && typeflag !== '7') continue; // devices, hardlinks
-    entries.push({ path: name, type, data: type === 'file' ? data : new Uint8Array(0), mode, linkname });
+    else if (typeflag === '1') {
+      // A hardlink repeats a file stored earlier in the archive; keep it as a copy of that file.
+      const target = byPath.get(linkname.replace(/^(\.\/)+/, ''));
+      if (!target) continue;
+      const copy = { path: name, type: 'file', data: target.data, mode: mode || target.mode, linkname: '' };
+      entries.push(copy);
+      byPath.set(name.replace(/^(\.\/)+/, ''), copy);
+      continue;
+    } else if (typeflag !== '0' && typeflag !== '\0' && typeflag !== '7') continue; // devices
+    const entry = { path: name, type, data: type === 'file' ? data : new Uint8Array(0), mode, linkname };
+    entries.push(entry);
+    byPath.set(name.replace(/^(\.\/)+/, ''), entry);
   }
   return entries;
 }

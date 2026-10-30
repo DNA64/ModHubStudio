@@ -83,13 +83,19 @@ async function unwrapNested(entries, name) {
 export function makeMod({ name, kind, entries, source }) {
   const files = [];
   const seen = new Set();
+  const filled = new Set();
+  for (const e of entries) {
+    if (e.type === 'dir') continue;
+    const segs = cleanLeading(e.path).split('/');
+    for (let i = 1; i < segs.length; i++) filled.add(segs.slice(0, i).join('/'));
+  }
   for (const e of entries) {
     const path = cleanLeading(e.path).replace(/\/+$/, '');
     if (!path || path === '.') continue;
-    if (e.type === 'dir') continue; // directories are implied by files
+    if (e.type === 'dir' && filled.has(path)) continue; // implied by the files inside it
     if (seen.has(path)) continue;
     seen.add(path);
-    files.push({ path, type: e.type, data: e.data || new Uint8Array(0), mode: e.mode ?? null, linkname: e.linkname || '' });
+    files.push({ path, type: e.type, data: e.data || new Uint8Array(0), mode: e.type === 'dir' ? null : e.mode ?? null, linkname: e.linkname || '' });
   }
   const mod = {
     id: newId(),
