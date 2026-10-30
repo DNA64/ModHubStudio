@@ -21,11 +21,12 @@ export function readmeText(mod) {
 
 // Entries in the order a person would read them: control scripts, readme, then the tree.
 export function packEntries(mod) {
-  const files = mod.files.map((f) => ({ ...f, mode: fileMode(f, mod.kind) }));
+  const files = mod.files.filter((f) => f.type !== 'dir').map((f) => ({ ...f, mode: fileMode(f, mod.kind) }));
+  const emptyDirs = mod.files.filter((f) => f.type === 'dir').map((f) => f.path);
   const control = CONTROL_FILES.map((n) => files.find((f) => f.path === n)).filter(Boolean);
   const rest = files.filter((f) => mod.kind === 'game' || !CONTROL_FILES.includes(f.path)).sort((a, b) => a.path.localeCompare(b.path));
   const dirs = new Set();
-  for (const f of rest) {
+  for (const f of [...rest, ...emptyDirs.map((path) => ({ path: `${path}/.`}))]) {
     const segs = f.path.split('/');
     for (let i = 1; i < segs.length; i++) dirs.add(segs.slice(0, i).join('/'));
   }

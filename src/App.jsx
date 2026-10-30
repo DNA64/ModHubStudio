@@ -251,7 +251,7 @@ function FileRow({ file: f, mod, update, remove }) {
             {error && <span className="field-error">{error}</span>}
           </div>
         ) : (
-          <><code>{f.path}</code>{f.type === 'symlink' && <span className="muted small"> → {f.linkname}</span>}</>
+          <><code>{f.path}{f.type === 'dir' ? '/' : ''}</code>{f.type === 'symlink' && <span className="muted small"> → {f.linkname}</span>}</>
         )}
       </td>
       <td><span className={`dest dest-${d.kind}`}>{d.label}</span></td>

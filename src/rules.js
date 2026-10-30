@@ -43,6 +43,20 @@ const hasCRLF = (u8) => { for (let i = 0; i < u8.length - 1; i++) if (u8[i] === 
 const toLF = (u8) => textBytes(bytesText(u8).replace(/\r\n/g, '\n'));
 const inExecDir = (p) => EXEC_DIRS.some((d) => p.startsWith(d + '/') && !p.slice(d.length + 1).includes('/'));
 const stripComments = (s) => s.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '')).join('\n');
+// `exit` as a command: at the start of a line or after ; & | ( { then do else.
+const hasExit = (code) => /(^|[;&|({]|\b(?:then|do|else)\b)\s*exit(?=\s|;|$)/m.test(code);
+// Code outside every { } block, so outside any function body.
+function topLevelCode(code) {
+  let depth = 0;
+  const out = [];
+  for (const line of code.split('\n')) {
+    const bare = line.replace(/\$\{[^}]*\}/g, '');
+    if (depth === 0) out.push(line);
+    depth = Math.max(0, depth + (bare.match(/\{/g) || []).length - (bare.match(/\}/g) || []).length);
+  }
+  return out.join('\n');
+}
+const hasTopLevelReturn = (code) => /(^|[;&|({]|\b(?:then|do|else)\b)\s*return(?=\s|;|$)/m.test(topLevelCode(code));
 const lastCodeLine = (s) => stripComments(s).split('\n').map((l) => l.trim()).filter(Boolean).pop() || '';
 const top = (p) => p.split('/')[0];
 
@@ -55,7 +69,7 @@ function commonWrapper(files) {
   const firsts = new Set(files.map((f) => (f.path.includes('/') ? top(f.path) : null)));
   if (firsts.size !== 1) return null;
   const only = [...firsts][0];
-  if (!only) return null;
+  if (!only || only === '..') return null;
   if (OVERLAY_ROOTS.includes(only) || RUNTIME_ROOTS.includes(only)) return null;
   return only;
 }
@@ -159,6 +173,10 @@ export function validate(mod) {
   if (bs.length) add('backslash-paths', 'error', 'Windows path separators',
     'These entries use backslashes, which Linux treats as part of the file name. The console would get one file literally named `usr\\share\\…` in the root.', bs, 'Convert to forward slashes');
 
+  const dotdot = paths.filter((p) => p.split('/').includes('..'));
+  if (dotdot.length) add('path-dotdot', 'error', 'Paths that climb out of the package',
+    'A .. folder in a path makes tar write outside the folder hakchi unpacks into.', dotdot);
+
   const junk = paths.filter((p) => JUNK_RE.test(p));
   if (junk.length) add('junk', 'warning', 'OS junk files included',
     'Finder, Explorer or git metadata would be copied onto the console and waste NAND space.', junk, 'Remove them');
@@ -247,6 +265,7 @@ function validateContent(mod, original) {
     files = mod.files;
     paths = files.map((f) => f.path);
   }
+  const dirPaths = new Set(files.filter((f) => f.type === 'dir').map((f) => f.path));
   const loose = [];
   const unknownRoot = [];
   const runtimeRoot = [];
@@ -254,7 +273,7 @@ function validateContent(mod, original) {
   const droppedDocs = [];
   for (const p of paths) {
     if (/\.hmod(\/|$)/i.test(p)) { nested.push(p); continue; }
-    if (!p.includes('/')) {
+    if (!p.includes('/') && !dirPaths.has(p)) {
       if (CONTROL_FILES.includes(p)) continue;
       if (/^readme(\..*)?$/i.test(p) || /\.(txt|md)$/i.test(p)) { droppedDocs.push(p); continue; }
       loose.push(p);
@@ -309,9 +328,12 @@ function validateContent(mod, original) {
   const noNewline = okPreinit.filter((f) => isText(f.data) && f.data.length && f.data[f.data.length - 1] !== 10);
   if (noNewline.length) add('preinit-newline', 'error', 'Boot script missing a final newline',
     "hakchi concatenates every preinit script before running them. Without a trailing newline, this script's last line merges with the next script's first line and both break.", noNewline.map((f) => f.path), 'Add trailing newlines');
-  const exitPreinit = okPreinit.filter((f) => isText(f.data) && /^\s*exit\b/m.test(stripComments(bytesText(f.data))));
+  const exitPreinit = okPreinit.filter((f) => isText(f.data) && hasExit(stripComments(bytesText(f.data))));
   if (exitPreinit.length) add('preinit-exit', 'error', '`exit` in a boot script',
-    'All preinit scripts run in one shell, so `exit` aborts every script after it, including hakchi\'s own. Use `return` or an if-block instead.', exitPreinit.map((f) => f.path));
+    'All preinit scripts run in one shell, so `exit` aborts every script after it, including hakchi\'s own. Use an if-block instead, or wrap the work in a function.', exitPreinit.map((f) => f.path));
+  const returnPreinit = okPreinit.filter((f) => isText(f.data) && hasTopLevelReturn(stripComments(bytesText(f.data))));
+  if (returnPreinit.length) add('preinit-return', 'error', '`return` outside a function in a boot script',
+    'hakchi joins every preinit script into one file and sources it, so a `return` at the top level ends that whole file and skips every script after it. Put it inside a function, or use an if-block.', returnPreinit.map((f) => f.path));
 
   // --- control scripts
   for (const name of CONTROL_FILES) {
@@ -319,7 +341,7 @@ function validateContent(mod, original) {
     if (!f) continue;
     if (!isText(f.data)) { add(`binary-${name}`, 'error', `\`${name}\` is not a text script`, 'hakchi sources this file as a shell script.', [name]); continue; }
     const code = stripComments(bytesText(f.data).replace(/\r\n/g, '\n'));
-    if (/^\s*exit\b/m.test(code)) add(`exit-${name}`, 'error', `\`exit\` in ${name}`,
+    if (hasExit(code)) add(`exit-${name}`, 'error', `\`exit\` in ${name}`,
       `hakchi sources ${name} inside its own installer shell. \`exit\` ends the whole install, leaving later mods and the uninstall list unwritten. Use \`return\`.`, [name]);
   }
   const install = files.find((f) => f.path === 'install');
