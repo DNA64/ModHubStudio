@@ -2,7 +2,7 @@
 const FRONT_RE = /^(?:-{3,}[\r\n]+([\s\S]*?)[\r\n]*-{3,})?[\r\n\t\s]*([\s\S]*)[\r\n\t\s]*$/;
 const FIELD_RE = /^[ \t]*([^:\r\n]+?)[ \t]*:[ \t]*(.*?)[ \t]*$/gm;
 
-export const STANDARD_FIELDS = ['Name', 'Creator', 'Category', 'Version', 'Emulated System', 'Tags'];
+export const STANDARD_FIELDS = ['Name', 'Creator', 'Maintainer', 'Category', 'Version', 'Emulated System', 'Prerequisite', 'Command Line', 'Tags'];
 // Written by this tool from the Consoles setting; not edited as free text.
 export const MANAGED_FIELDS = ['Consoles'];
 export const REQUIRED_FIELDS = ['Name', 'Creator', 'Category', 'Version'];
