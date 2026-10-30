@@ -82,6 +82,9 @@ test('return at the top of a boot script is an error, inside a function it is fi
   assert.ok((await check({ 'etc/preinit.d/p8100_x': 'if true; then\n  return 0\nfi\n' })).includes('preinit-return'));
   const inFunction = 'mymod_start() {\n  [ -f /x ] || return 0\n  echo ${HOME}\n}\nmymod_start\n';
   assert.ok(!(await check({ 'etc/preinit.d/p8100_x': inFunction })).includes('preinit-return'));
+  assert.ok(!(await check({ 'etc/preinit.d/p8100_x': 'f() { return 0; }\nf\n' })).includes('preinit-return'), 'one-line function');
+  assert.ok(!(await check({ 'etc/preinit.d/p8100_x': 'f() { [ -f /x ] || return 0\n  echo a\n}\nf\n' })).includes('preinit-return'), 'return on the opening line');
+  assert.ok((await check({ 'etc/preinit.d/p8100_x': 'f() { echo a; }\nf || return 0\n' })).includes('preinit-return'), 'after a closed function');
   assert.ok(!(await check({ install: 'echo a\nreturn 0\n' })).includes('preinit-return'), 'install may return');
 });
 

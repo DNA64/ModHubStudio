@@ -45,18 +45,16 @@ const inExecDir = (p) => EXEC_DIRS.some((d) => p.startsWith(d + '/') && !p.slice
 const stripComments = (s) => s.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '')).join('\n');
 // `exit` as a command: at the start of a line or after ; & | ( { then do else.
 const hasExit = (code) => /(^|[;&|({]|\b(?:then|do|else)\b)\s*exit(?=\s|;|$)/m.test(code);
-// Code outside every { } block, so outside any function body.
-function topLevelCode(code) {
-  let depth = 0;
-  const out = [];
-  for (const line of code.split('\n')) {
-    const bare = line.replace(/\$\{[^}]*\}/g, '');
-    if (depth === 0) out.push(line);
-    depth = Math.max(0, depth + (bare.match(/\{/g) || []).length - (bare.match(/\}/g) || []).length);
+// A `return` that sits outside every { } block, so outside any function body.
+function hasTopLevelReturn(code) {
+  const bare = code.replace(/\$\{[^}]*\}/g, (m) => ' '.repeat(m.length));
+  const re = /(^|[;&|({]|\b(?:then|do|else)\b)\s*return(?=\s|;|$)/gm;
+  for (let m; (m = re.exec(bare));) {
+    const before = bare.slice(0, m.index + m[0].lastIndexOf('return'));
+    if ((before.match(/\{/g) || []).length <= (before.match(/\}/g) || []).length) return true;
   }
-  return out.join('\n');
+  return false;
 }
-const hasTopLevelReturn = (code) => /(^|[;&|({]|\b(?:then|do|else)\b)\s*return(?=\s|;|$)/m.test(topLevelCode(code));
 const lastCodeLine = (s) => stripComments(s).split('\n').map((l) => l.trim()).filter(Boolean).pop() || '';
 const top = (p) => p.split('/')[0];
 
