@@ -2,16 +2,19 @@
 // Checks a pull request to a central hmod repository.
 //   node ci/check-pr.mjs --base <dir> --head <dir> --author <login> [--summary <file>]
 // --base is the target branch checked out, --head the pull request. The admin
-// list comes from the base branch, so a pull request can't make itself an admin.
+// list and namespaces.json come from the base branch, so a pull request can't
+// make itself an admin or grant itself a namespace.
 import fs from 'node:fs';
 import path from 'node:path';
 import { args, need, loadPackages, listFiles, readJson } from './lib.mjs';
-import { checkSubmission, reportMarkdown, PACKAGES_DIR, DEFAULT_MAX_MB } from '../src/central.js';
+import { checkSubmission, reportMarkdown, parseNamespaces, PACKAGES_DIR, DEFAULT_MAX_MB, NAMESPACES_FILE } from '../src/central.js';
 
 const opts = args();
 need(opts, 'base', 'head', 'author');
 
 const config = readJson(path.join(opts.base, 'repo.json'));
+const nsFile = path.join(opts.base, NAMESPACES_FILE);
+const namespaces = parseNamespaces(fs.existsSync(nsFile) ? fs.readFileSync(nsFile, 'utf8') : null);
 const baseFiles = new Map(listFiles(opts.base).map((p) => [p, fs.readFileSync(path.join(opts.base, p))]));
 const headFiles = new Map(listFiles(opts.head).map((p) => [p, fs.readFileSync(path.join(opts.head, p))]));
 // A package is packages/<name>.hmod|.clvg plus its .json; anything else that
@@ -29,6 +32,7 @@ const result = await checkSubmission({
   admins: config.admins || [],
   maxMB: Number(config.maxPackageMB) || DEFAULT_MAX_MB,
   otherChanges,
+  namespaces,
 });
 
 const report = reportMarkdown(result, opts.author);

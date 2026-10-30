@@ -5,7 +5,7 @@ import { buildTar } from '../src/tar.js';
 import { modFromArchive } from '../src/model.js';
 import { validate, applyFix, applyAllFixes, destination, fileMode } from '../src/rules.js';
 
-const mod = async (spec, name = 'test_mod.hmod') => modFromArchive(name, await tgz(spec));
+const mod = async (spec, name = 'tester.test-mod.hmod') => modFromArchive(name, await tgz(spec));
 const blocking = (issues) => issues.filter((i) => i.severity !== 'info');
 
 test('a well-formed mod has no errors or warnings', async () => {

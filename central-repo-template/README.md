@@ -24,15 +24,41 @@ the package and opens the pull request for you.
 By hand, add two files under `packages/` in a pull request:
 
 ```
-packages/My_Mod.hmod         the package, packed by Mod Hub Studio
-packages/My_Mod.hmod.json    { "version": "1.0.0", "maintainers": ["your-github-login"] }
+packages/yourname.my-mod.hmod         the package, packed by Mod Hub Studio
+packages/yourname.my-mod.hmod.json    { "version": "1.0.0", "maintainers": ["your-github-login"] }
 ```
+
+## Package IDs
+
+A package's file name is its Package ID, and it never changes once
+published. Hakchi2 CE and other packages refer to it by that ID.
+
+- Lowercase letters, digits and hyphens, in two or more parts separated by
+  dots: `yourname.my-mod`, or `yourname.snes9x-fast.core` if you like more
+  detail. No underscores.
+- The first part is your **namespace**. Use the same one for all your
+  packages.
+- The first package in a new namespace needs an admin's approval; the check
+  lists it under **Needs admin approval**. After that the namespace is yours:
+  anyone who maintains a package in it can publish more under it, and nobody
+  else can.
+- Common words (`theme`, `core`, `snes9x`, `retroarch` and others) can't be
+  namespaces.
+- `dna64`, `dna-64` and `dna_64` count as the same namespace.
+- Someone else's namespace can't appear as a part of your ID
+  (`snes9x.dna64`). Inside a part (`yourname.dna64-fix`), it's flagged for
+  an admin to check.
+- Games (`.clvg`) are named the same way. Hakchi2 CE takes the game's code
+  from the `CLV-X-XXXXX.desktop` file inside, not from the archive name, and
+  each code may only be used by one game here.
 
 ## Rules the checks enforce
 
 - Only files in `packages/` may change (admins excepted).
-- Each package is a plain tar.gz `.hmod` or `.clvg`, named the way Hakchi2 CE
-  names it, with no errors from Mod Hub Studio's checks.
+- Each package is a plain tar.gz `.hmod` or `.clvg`, named with a Package ID,
+  with no errors from Mod Hub Studio's checks.
+- New packages follow the namespace rules above, and no two games share a
+  game code.
 - Mods carry a `Version` in their readme, matching the `.json` file.
 - An update must raise the version above the one already published.
 - Only a package's listed maintainers (or an admin) can update or remove it;
@@ -45,6 +71,8 @@ packages/My_Mod.hmod.json    { "version": "1.0.0", "maintainers": ["your-github-
 1. Create the repository on GitHub from these files.
 2. Edit `repo.json`: the title, description, admins, and `siteUrl` if you use
    a custom domain. Change the owners in `.github/CODEOWNERS` to match.
+   Optionally list extra reserved words in `namespaces.json`, or grant a
+   namespace to people by hand: `"namespaces": { "dna64": ["DNA64"] }`.
 3. Merge or push once to `main` so **Publish site** creates the `gh-pages`
    branch, then set Settings → Pages to "Deploy from a branch", `gh-pages`,
    `/ (root)`.

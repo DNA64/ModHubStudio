@@ -60,9 +60,13 @@ Checks against the targets:
 - Games whose stock emulator doesn't exist on the target, or can't open the ROM type. Games that launch through a RetroArch core are noted as needing RetroArch and that core.
 - Programs built for a PC (x86) or anything other than 32-bit ARM.
 
-### Renaming
+### Package ID and renaming
 
-The package's file name is editable at the top of each package. Files inside a package can be renamed or moved from the Files tab by typing a new path.
+A package's file name is its **Package ID**, editable at the top of each package: `yourname.package`, for example `dna64.snes9x-theme.hmod`. IDs are lowercase letters, digits and hyphens in two or more dot-separated parts, with no underscores (Hakchi2 CE adds `_1`, `_2`… to a name already in `user_mods`, so a trailing `_N` is never part of an ID). The first part is your namespace; extra parts, like `dna64.snes9x.core`, are up to you.
+
+A package without one gets a warning and a suggested ID built from its readme's Creator and Name, with a button to use it. The central repository requires an ID; your own Mod Hub site doesn't. Games are named the same way: Hakchi2 CE takes a game's code from the `CLV-X-XXXXX.desktop` file inside the `.clvg`, not from the archive's name.
+
+Files inside a package can be renamed or moved from the Files tab by typing a new path.
 
 ## Publish
 
@@ -89,7 +93,7 @@ Under **Your Mod Hub site** choose **My own web host**, enter the address the fi
 
 ### To a central repository, by pull request
 
-Under **Central repository**, the MMC Central Repository (`DNA64/ModHubRepo`) is filled in; enter another `owner/name` to submit elsewhere. Every package is listed; click **Check** on one, then **Open pull request**. The tool forks the central repository into your account (or uses a branch if you can write to it), adds the package and opens the pull request. It checks the same rules the central repository's CI does first, so a submission that would be rejected never becomes a pull request.
+Under **Central repository**, the MMC Central Repository (`DNA64/ModHubRepo`) is filled in; enter another `owner/name` to submit elsewhere. Every package is listed; click **Check** on one, then **Open pull request**. The tool forks the central repository into your account (or uses a branch if you can write to it), adds the package and opens the pull request. It checks the same rules the central repository's CI does first, so a submission that would be rejected never becomes a pull request. The one exception is a game whose code another game already uses; only CI sees every game, so that's reported on the pull request.
 
 ## Run a central repository
 
@@ -97,6 +101,7 @@ Under **Central repository**, the MMC Central Repository (`DNA64/ModHubRepo`) is
 
 ```
 repo.json                    title, description, admins, optional siteUrl, maxPackageMB
+namespaces.json              optional: extra reserved words, namespaces granted by hand
 packages/<file>.hmod|.clvg   each package exactly as Hakchi2 CE downloads it
 packages/<file>.json         { "version": "1.2.0", "maintainers": ["login"] }
 .github/workflows/check.yml  checks every pull request
@@ -110,6 +115,9 @@ The checks (`ci/check-pr.mjs`, using `src/central.js`) enforce:
 - Updates must raise the version.
 - Only a package's maintainers or an admin can update or remove it, and a new package must list its submitter. Admins come from `repo.json` on the target branch, so a pull request can't make itself an admin.
 - Only files in `packages/` may change, except by admins.
+- Every package is named with a Package ID, admins included.
+- Namespaces: whoever maintains a package in a namespace owns it, and `namespaces.json` can grant one by hand. The first package in a new namespace is listed under **Needs admin approval** in the check report. Reserved words (`theme`, `core`, `snes9x`, `retroarch` and others, plus any in `namespaces.json`) can't be namespaces. `dna64`, `dna-64` and `dna_64` are the same namespace. Someone else's namespace can't be a part of a new ID (`snes9x.dna64`); inside a part (`you.dna64-fix`) it's listed for approval.
+- No two games share a game code, compared without case.
 
 The workflows run this repository's code at a ref you choose (`PUBLISHER_REPO` and `PUBLISHER_REF` at the top of each workflow), so pin a tag.
 
@@ -135,6 +143,7 @@ The rules come from hakchi's source code, not from convention:
 | Executables outside bin, sbin, usr/bin, usr/sbin, etc/init.d | hakchi only chmods those folders |
 | Nested `.hmod`, root-level `.txt`/`.md` | Skipped or deleted by `pack_install` |
 | Bad file-name characters, blacklisted names | CE renames them; hakchi refuses blacklisted names |
+| Name isn't a Package ID | Required by the central repository; a warning elsewhere |
 | Front matter not at the very top | CE ignores Name, Creator and Version |
 
 ### .clvg games
@@ -193,7 +202,8 @@ The built page loads React, ReactDOM, JSZip and SparkMD5 from cdnjs, and its fon
 | `src/repo.js` | Repository export |
 | `src/github.js` | GitHub API client (commits through the Git database API) |
 | `src/publish.js` | Publishing to GitHub Pages, custom domains |
-| `src/central.js` | Central repository rules: versions, maintainers, package checks |
+| `src/packageid.js` | Package ID format, namespaces, reserved words, suggested IDs |
+| `src/central.js` | Central repository rules: versions, maintainers, namespaces, game codes, package checks |
 | `src/submit.js` | Submitting a package by pull request |
 | `ci/` | Scripts the central repository's workflows run |
 | `central-repo-template/` | A ready-to-copy central repository |
