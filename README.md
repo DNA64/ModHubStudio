@@ -74,11 +74,12 @@ Everything here is on the **Publish** tab. Connect your GitHub account once at t
 
 ### To your own GitHub Pages site
 
-Under **Your Mod Hub site** choose **GitHub Pages**, enter a repository you own (for example `you/hmods`; create it on GitHub first, it can be empty) and the branch, and click **Publish to GitHub Pages**. The tool commits the whole repository site in one commit:
+Under **Your own Mod Hub site** choose **GitHub Pages**, enter a repository you own (for example `you/hmods`; create it on GitHub first, it can be empty) and the branch, and click **Publish to GitHub Pages**. The tool commits the whole repository site in one commit:
 
 - Only `.repo/`, `hmods/`, `games/`, `.nojekyll`, `CNAME` and the generated `index.html` are written. Your own README, licence, or a hand-made `index.html` stay as they are.
 - Packages you removed from the list are deleted from `hmods/` and `games/`.
 - Unchanged files aren't uploaded again, and publishing with no changes makes no commit.
+- A central repository can never be the target: the default one, the one entered under **Central repository**, or any repository whose `repo.json` lists `admins`. The tool refuses before writing anything. Packages reach a central repository only by pull request.
 - A branch that doesn't exist yet (for example `gh-pages`) starts its own history holding only the site.
 
 The first time, turn Pages on in the repository's **Settings → Pages**: "Deploy from a branch", your branch, `/ (root)`. The tool does this itself if the token has the `repo` scope.
@@ -93,7 +94,7 @@ Under **Your Mod Hub site** choose **My own web host**, enter the address the fi
 
 ### To a central repository, by pull request
 
-Under **Central repository**, the MMC Central Repository (`DNA64/ModHubRepo`) is filled in; enter another `owner/name` to submit elsewhere. Every package is listed; click **Check** on one, then **Open pull request**. The tool forks the central repository into your account (or uses a branch if you can write to it), adds the package and opens the pull request. It checks the same rules the central repository's CI does first, so a submission that would be rejected never becomes a pull request. The one exception is a game whose code another game already uses; only CI sees every game, so that's reported on the pull request.
+Under **Central repository**, the MMC Central Repository (`DNA64/ModHubRepo`) is filled in; enter another `owner/name` to submit elsewhere. Every package is listed; click **Check** on one, then **Submit for review**. The tool forks the central repository into your account (or uses a branch if you can write to it), adds the package and opens the pull request. It checks the same rules the central repository's CI does first, so a submission that would be rejected never becomes a pull request. The one exception is a game whose code another game already uses; only CI sees every game, so that's reported on the pull request.
 
 ## Run a central repository
 
@@ -103,7 +104,7 @@ Under **Central repository**, the MMC Central Repository (`DNA64/ModHubRepo`) is
 repo.json                    title, description, admins, optional siteUrl, maxPackageMB
 namespaces.json              optional: extra reserved words, namespaces granted by hand
 packages/<file>.hmod|.clvg   each package exactly as Hakchi2 CE downloads it
-packages/<file>.json         { "version": "1.2.0", "maintainers": ["login"] }
+packages/<file>.json         { "version": "1.2.0", "maintainers": [{ "login": "alice", "id": 12345 }] }
 .github/workflows/check.yml  checks every pull request
 .github/workflows/publish.yml rebuilds the Mod Hub site on gh-pages after each merge
 ```
@@ -113,7 +114,11 @@ The checks (`ci/check-pr.mjs`, using `src/central.js`) enforce:
 - Every package passes this tool's checks with no errors, is a plain tar.gz named the way Hakchi2 CE names it, and stays under the size limit.
 - Mods have a `Version` in their readme, matching the `.json`.
 - Updates must raise the version.
-- Only a package's maintainers or an admin can update or remove it, and a new package must list its submitter. Admins come from `repo.json` on the target branch, so a pull request can't make itself an admin.
+- Only a package's maintainers or an admin can update it, and a new package must list its submitter. Admins come from `repo.json` on the target branch, so a pull request can't make itself an admin.
+- Maintainers are matched by numeric GitHub user ID when the `.json` records one (Mod Hub Studio always does), so a login someone renamed away from and a stranger re-registered gets nothing. Plain `"login"` entries from older files still match by login. Each entry must be a valid GitHub username.
+- Listing anyone besides the submitter on a new package, or any change to an existing package's maintainers, is listed under **Needs admin approval**.
+- The check runs on `pull_request_target`, so GitHub uses `check.yml` from the target branch and a pull request can't edit its own check. The pull request's files are only read, never run.
+- Removing a package is only a request: only its maintainers can ask, and the check lists every removal under **Needs admin approval** so the owner decides by merging or closing.
 - Only files in `packages/` may change, except by admins.
 - Every package is named with a Package ID, admins included.
 - Namespaces: whoever maintains a package in a namespace owns it, and `namespaces.json` can grant one by hand. The first package in a new namespace is listed under **Needs admin approval** in the check report. Reserved words (`theme`, `core`, `snes9x`, `retroarch` and others, plus any in `namespaces.json`) can't be namespaces. `dna64`, `dna-64` and `dna_64` are the same namespace. Someone else's namespace can't be a part of a new ID (`snes9x.dna64`); inside a part (`you.dna64-fix`) it's listed for approval.

@@ -5,7 +5,9 @@
 // Layout of a central repository:
 //   repo.json                    { title, readme, siteUrl, admins: [github logins], maxPackageMB }
 //   packages/<file>.hmod|.clvg   the package exactly as Hakchi2 CE downloads it
-//   packages/<file>.json         { "version": "1.2.0", "maintainers": ["login"] }
+//   packages/<file>.json         { "version": "1.2.0", "maintainers": [{ "login": "alice", "id": 12345 }] }
+//                                a maintainer can also be a plain "login" (older files); the numeric
+//                                GitHub ID is what counts when it's there, since logins can be renamed
 //   namespaces.json              optional: { "reserved": ["word"], "namespaces": { "dna64": ["login"] } }
 //
 // Package IDs (src/packageid.js): the file name is the ID, yourname.package.
@@ -43,22 +45,52 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+// GitHub's username rules: letters, digits and single hyphens, up to 39.
+const LOGIN = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
+
+// A maintainer, admin or namespace owner: "login" or { login, id }.
+export function person(x) {
+  if (x && typeof x === 'object') {
+    const id = x.id == null || x.id === '' ? null : Number(x.id);
+    return { login: String(x.login || '').trim(), id: Number.isSafeInteger(id) && id > 0 ? id : (id == null ? null : NaN) };
+  }
+  return { login: String(x == null ? '' : x).trim(), id: null };
+}
+const personJson = (p) => (p.id ? { login: p.login, id: p.id } : p.login);
+export const names = (list) => (list || []).map((x) => person(x).login).join(', ');
+
 export function parseMeta(text, file) {
   let m;
   try { m = JSON.parse(text); } catch { return { error: `${metaPath(file)} isn't valid JSON.` }; }
   if (!m || typeof m !== 'object') return { error: `${metaPath(file)} must be a JSON object.` };
-  const maintainers = Array.isArray(m.maintainers) ? m.maintainers.map((x) => String(x).trim()).filter(Boolean) : [];
+  const maintainers = Array.isArray(m.maintainers) ? m.maintainers.map(person).filter((p) => p.login) : [];
   if (!maintainers.length) return { error: `${metaPath(file)} needs at least one GitHub login in "maintainers".` };
+  for (const p of maintainers) {
+    if (!LOGIN.test(p.login)) return { error: `${metaPath(file)}: "${p.login}" isn't a GitHub username. List each maintainer as its own entry, without @.` };
+    if (Number.isNaN(p.id)) return { error: `${metaPath(file)}: the "id" for ${p.login} must be their numeric GitHub user ID.` };
+  }
   if (!String(m.version || '').trim()) return { error: `${metaPath(file)} needs a "version".` };
   return { meta: { version: String(m.version).trim(), maintainers } };
 }
 
 export function metaText(meta) {
-  return JSON.stringify({ version: meta.version, maintainers: meta.maintainers }, null, 2) + '\n';
+  return JSON.stringify({ version: meta.version, maintainers: meta.maintainers.map((x) => personJson(person(x))) }, null, 2) + '\n';
 }
 
 const lower = (s) => String(s).toLowerCase();
-const isIn = (login, list) => (list || []).some((x) => lower(x) === lower(login));
+// Is this person in the list? A numeric ID decides when both sides have one,
+// so a login someone gave up and a stranger re-registered doesn't match.
+const same = (a, b) => {
+  const x = person(a);
+  const y = person(b);
+  if (x.id && y.id) return x.id === y.id;
+  return lower(x.login) === lower(y.login);
+};
+const isIn = (who, list) => (list || []).some((x) => same(who, x));
+
+// The maintainer list as a comparable value: login and ID of each, sorted.
+const roster = (list) => (list || []).map(person).map((p) => `${lower(p.login)}#${p.id || ''}`).sort().join(',');
+const describe = (p) => (p.id ? `${p.login} (GitHub ID ${p.id}, https://api.github.com/user/${p.id})` : `${p.login} (no GitHub ID recorded)`);
 
 // Checks one package file as it would be after the pull request.
 export async function checkPackage(file, bytes, meta, { maxMB = DEFAULT_MAX_MB } = {}) {
@@ -129,6 +161,7 @@ export function idFormatErrors(file) {
 // The ID and namespace rules for a package that's new to the repository.
 // Returns { errors, approvals }.
 export function checkNewId(file, { author, isAdmin, registry, reserved = [] }) {
+  const who = person(author).login;
   const errors = [];
   const approvals = [];
   const id = idOf(file);
@@ -141,9 +174,9 @@ export function checkNewId(file, { author, isAdmin, registry, reserved = [] }) {
   if (isReserved(ns, reserved)) {
     errors.push(`${file}: "${ns}" is a reserved word and can't be used as a namespace. Start the ID with your own name, like yourname.${parts.slice(1).join('.')}.`);
   } else if (mine && !owns(mine)) {
-    errors.push(`${file}: the namespace "${ns}"${mine.name !== ns ? ` (the same as "${mine.name}")` : ''} belongs to ${mine.owners.join(', ') || 'someone else'}. Start the ID with your own name.`);
+    errors.push(`${file}: the namespace "${ns}"${mine.name !== ns ? ` (the same as "${mine.name}")` : ''} belongs to ${names(mine.owners) || 'someone else'}. Start the ID with your own name.`);
   } else if (!mine) {
-    approvals.push(`${file} starts the new namespace "${ns}". Merging gives ${author} the namespace.`);
+    approvals.push(`${file} starts the new namespace "${ns}". Merging gives ${who} the namespace.`);
   }
   // Someone else's namespace anywhere else in the ID is impersonation;
   // inside a part (dna64-fix) it may be legitimate, so it goes to review.
@@ -151,12 +184,12 @@ export function checkNewId(file, { author, isAdmin, registry, reserved = [] }) {
     const k = squash(part);
     const whole = i > 0 && registry.get(k);
     if (whole && !owns(whole)) {
-      errors.push(`${file}: "${part}" is ${whole.owners.join(', ') || 'someone else'}'s namespace, and only they can use it in a Package ID.`);
+      errors.push(`${file}: "${part}" is ${names(whole.owners) || 'someone else'}'s namespace, and only they can use it in a Package ID.`);
       continue;
     }
     for (const [other, entry] of registry) {
       if (other === k || other.length < MIN_EMBEDDED || !k.includes(other) || owns(entry)) continue;
-      approvals.push(`${file} contains "${entry.name}", the namespace of ${entry.owners.join(', ') || 'another author'}. Check it isn't posing as their package.`);
+      approvals.push(`${file} contains "${entry.name}", the namespace of ${names(entry.owners) || 'another author'}. Check it isn't posing as their package.`);
     }
   }
   return { errors, approvals };
@@ -179,6 +212,8 @@ export async function checkSubmission({ before, after, author, admins = [], maxM
   const warnings = [];
   const approvals = [];
   const changes = [];
+  author = person(author);
+  const who = author.login;
   const isAdmin = isIn(author, admins);
   const ns = { reserved: namespaces.reserved || [], namespaces: namespaces.namespaces || {} };
   if (namespaces.error) errors.push(namespaces.error);
@@ -205,7 +240,10 @@ export async function checkSubmission({ before, after, author, admins = [], maxM
     const owners = prevMeta ? prevMeta.maintainers : [];
 
     if (!now) {
-      if (!isAdmin && !isIn(author, owners)) errors.push(`${author} can't remove ${file}; only its maintainers (${owners.join(', ') || 'none listed'}) or an admin can.`);
+      // A removal is only ever a request: its maintainers (or an admin) may
+      // ask, and it's always listed for the owner to decide on before merging.
+      if (!isAdmin && !isIn(author, owners)) errors.push(`${who} can't ask to remove ${file}; only its maintainers (${names(owners) || 'none listed'}) can.`);
+      else approvals.push(`${file} would be removed. Removing a package is a request: merge only if you agree.`);
       changes.push({ file, action: 'removed' });
       continue;
     }
@@ -216,18 +254,31 @@ export async function checkSubmission({ before, after, author, admins = [], maxM
     if (!was) {
       const clash = existingLower.get(lower(file));
       if (clash && clash !== file && !(before.has(clash) && !after.has(clash))) { errors.push(`${file} clashes with the existing ${clash}. Package names are compared without case.`); continue; }
-      if (!isAdmin && !isIn(author, meta.maintainers)) errors.push(`${file} is new, so ${author} must be listed in its maintainers.`);
+      if (!isAdmin && !isIn(author, meta.maintainers)) errors.push(`${file} is new, so ${who} must be listed in its maintainers.`);
       const idCheck = checkNewId(file, { author, isAdmin, registry, reserved: ns.reserved });
       errors.push(...idCheck.errors);
       for (const a of idCheck.approvals) if (!approvals.includes(a)) approvals.push(a);
     } else {
       errors.push(...idFormatErrors(file));
       if (!isAdmin && !isIn(author, owners)) {
-        errors.push(`${file} belongs to ${owners.join(', ')}. Ask one of them to add ${author} as a maintainer, or submit it under a different name.`);
+        errors.push(`${file} belongs to ${names(owners)}. Ask one of them to add ${who} as a maintainer, or submit it under a different name.`);
       }
       if (prevMeta && compareVersions(meta.version, prevMeta.version) <= 0) {
         errors.push(`${file} is already at version ${prevMeta.version}. Raise the Version in its readme above ${prevMeta.version} to publish an update.`);
       }
+    }
+    // Who maintains a package is the owner's call: listing anyone besides the
+    // submitter, or changing the list later, waits for an admin.
+    if (!was) {
+      const others = meta.maintainers.filter((p) => !same(author, p));
+      if (others.length) approvals.push(`${file} also lists ${others.map(describe).join('; ')} as maintainers. Merge only if they agreed.`);
+    } else if (prevMeta && roster(prevMeta.maintainers) !== roster(meta.maintainers)) {
+      const key = (p) => `${lower(p.login)}#${p.id || ''}`;
+      const oldKeys = new Set(prevMeta.maintainers.map(person).map(key));
+      const newKeys = new Set(meta.maintainers.map(person).map(key));
+      const added = meta.maintainers.map(person).filter((p) => !oldKeys.has(key(p)));
+      const removed = prevMeta.maintainers.map(person).filter((p) => !newKeys.has(key(p)));
+      approvals.push(`${file} changes its maintainers.${added.length ? ` Adds ${added.map(describe).join('; ')}.` : ''}${removed.length ? ` Removes ${removed.map(describe).join('; ')}.` : ''} Merge only if you agree.`);
     }
     const pkg = await checkPackage(file, now.bytes, meta, { maxMB });
     errors.push(...pkg.errors);
@@ -273,7 +324,7 @@ function sameBytes(a, b) {
 
 // Markdown report for the pull request's check summary.
 export function reportMarkdown(result, author) {
-  const lines = [`## Package check for ${author}`, ''];
+  const lines = [`## Package check for ${person(author).login}`, ''];
   if (result.changes.length) {
     lines.push('| Package | Change |', '|---|---|');
     for (const c of result.changes) lines.push(`| \`${c.file}\` | ${c.action}${c.version ? ` → ${c.version}` : ''}${c.from ? ` (was ${c.from})` : ''} |`);

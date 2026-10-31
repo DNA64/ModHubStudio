@@ -21,7 +21,8 @@ export function repoIssues(repo, mods) {
   if (/github\.com\/[^/]+\/[^/]+(\/|$)/i.test(base) && !/github\.io/i.test(base)) {
     out.push({ severity: 'error', text: 'github.com repository pages serve HTML, not files. Use your GitHub Pages address (username.github.io/repo) or raw.githubusercontent.com.' });
   }
-  if (!mods.length) out.push({ severity: 'error', text: 'Add at least one mod to publish.' });
+  // An empty repository is valid: it's how the last package is removed.
+  if (!mods.length) out.push({ severity: 'warning', text: 'There are no packages. Publishing makes the repository empty, so Hakchi2 CE will list nothing from it.' });
   const names = new Map();
   for (const m of mods) {
     const n = hmodFileName(m).toLowerCase();
@@ -65,7 +66,8 @@ export async function buildRepoFiles(repo, mods, packed) {
     meta.push({ path: `${fname}/readme.md`, data: textBytes(readme) });
     if (!mod.externalUrl) files.push({ path: `${mod.kind === 'game' ? 'games' : 'hmods'}/${fname}`, data: bytes });
   }
-  const list = textBytes(listLines.join('\n') + '\n');
+  // No packages: an empty list, not a blank line `hmod rlist` would print.
+  const list = textBytes(listLines.length ? listLines.join('\n') + '\n' : '');
   const repoReadme = textBytes((repo.readme || '').trim() + '\n');
 
   const tarEntries = [
@@ -115,7 +117,7 @@ ${INDEX_MARKER}
 <h1>${esc(repo.title || 'hmod repository')}</h1>
 <p>Add this repository in Hakchi2 CE under <b>Modules → Mod Hub → Repositories</b>:</p>
 <p><code>${esc(base)}</code></p>
-<table><tr><th>Package</th><th>Version</th><th>Consoles</th><th>Creator</th><th>Category</th></tr>
+${mods.length ? '' : '<p>This repository has no packages yet.</p>\n'}<table><tr><th>Package</th><th>Version</th><th>Consoles</th><th>Creator</th><th>Category</th></tr>
 ${rows}
 </table>
 <p><small>Published with <a href="${STUDIO_URL}">Mod Hub Studio</a>.</small></p>

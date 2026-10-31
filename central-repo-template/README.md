@@ -17,16 +17,30 @@ Modules → Mod Hub → Repositories → add:
 
 The easy way is [Mod Hub Studio](https://github.com/DNA64/ModHubStudio):
 open the **Publish** tab, check that **Central repository** says
-`DNA64/ModHubRepo` (the default), then click **Check** and **Open pull
-request** next to the package. It forks this repository, adds
+`DNA64/ModHubRepo` (the default), then click **Check** and **Submit for
+review** next to the package. It forks this repository, adds
 the package and opens the pull request for you.
+
+Don't use **Publish to GitHub Pages** for this repository. That's for your
+own site, and the Studio refuses to publish over a central repository.
 
 By hand, add two files under `packages/` in a pull request:
 
 ```
 packages/yourname.my-mod.hmod         the package, packed by Mod Hub Studio
-packages/yourname.my-mod.hmod.json    { "version": "1.0.0", "maintainers": ["your-github-login"] }
+packages/yourname.my-mod.hmod.json    the version and who maintains it (below)
 ```
+
+```json
+{
+  "version": "1.0.0",
+  "maintainers": [{ "login": "your-github-login", "id": 12345 }]
+}
+```
+
+`id` is your numeric GitHub user ID, shown at
+`https://api.github.com/users/your-github-login`. Mod Hub Studio fills it in
+for you. Older files may list a plain `"login"` instead, which still works.
 
 ## Package IDs
 
@@ -61,10 +75,30 @@ published. Hakchi2 CE and other packages refer to it by that ID.
   game code.
 - Mods carry a `Version` in their readme, matching the `.json` file.
 - An update must raise the version above the one already published.
-- Only a package's listed maintainers (or an admin) can update or remove it;
-  a new package must list the person submitting it.
+- Only a package's listed maintainers (or an admin) can update it; a new
+  package must list the person submitting it.
+- Maintainers are matched by GitHub user ID when the `.json` has one, so if
+  someone renames their account and a stranger registers the old name, the
+  stranger gets nothing.
+- Each maintainer is its own entry, with a valid GitHub username (no `@`, no
+  commas).
+- Listing anyone besides the submitter on a new package, or changing the
+  maintainers of an existing one, is listed under **Needs admin approval**.
+- Removing a package is only ever a request. Its maintainers can ask, by
+  opening a pull request that deletes its `.hmod` and `.json`. The check lists
+  it under **Needs admin approval**, and nothing is removed until an admin
+  merges it.
 - Packages are limited to `maxPackageMB` in `repo.json` (GitHub refuses files
   over 100 MB).
+
+## Removing a package
+
+To ask for a package to be removed, its maintainer opens a pull request that
+deletes both `packages/<file>.hmod` and `packages/<file>.json`. The owner
+decides: merge to remove it, or close the pull request to keep it.
+
+Give only the owner (or admins) permission to merge, with a branch protection
+rule on `main`, so the owner always has the final say.
 
 ## Setting up a copy of this repository
 
@@ -76,8 +110,25 @@ published. Hakchi2 CE and other packages refer to it by that ID.
 3. Merge or push once to `main` so **Publish site** creates the `gh-pages`
    branch, then set Settings → Pages to "Deploy from a branch", `gh-pages`,
    `/ (root)`.
-4. In Settings → Branches, protect `main`: require a pull request, one
-   approval, review from code owners, and the **Check packages** status.
+4. Protect `main` with a ruleset: Settings → Rules → Rulesets → New branch
+   ruleset, targeting the default branch, with enforcement Active.
+   - **Bypass list:** Repository admin, **For pull requests only**. The owner
+     can merge their own pull requests (nobody can approve their own), but
+     can't push straight to `main` either.
+   - Restrict deletions, and block force pushes.
+   - Require a pull request: 1 approval, review from Code Owners, dismiss
+     stale approvals, and require approval of the most recent push.
+   - Require status checks: **check** (it's listed once the check has run on
+     a pull request).
+
+   With `* @owner` in `.github/CODEOWNERS`, every pull request needs the
+   owner's review, so the owner keeps the final say even when other people
+   have write access.
+
+**Check packages** runs on `pull_request_target`, so GitHub always runs the
+copy of `check.yml` on `main`. A pull request that edits `check.yml` can't
+change or skip its own check; the edit only takes effect once merged. The
+pull request's files are read as data and never run.
 
 The checks run code from `PUBLISHER_REPO` at `PUBLISHER_REF` (set at the top
 of both workflows). Pin a tag there so a change to the publisher can't change

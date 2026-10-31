@@ -29,7 +29,54 @@ test('versions compare numerically', () => {
 test('meta files need a version and maintainers', () => {
   assert.match(parseMeta('{', 'x.hmod').error, /valid JSON/);
   assert.match(parseMeta('{"version":"1"}', 'x.hmod').error, /maintainers/);
-  assert.deepEqual(parseMeta('{"version":"1","maintainers":["a"]}', 'x.hmod').meta, { version: '1', maintainers: ['a'] });
+  assert.deepEqual(parseMeta('{"version":"1","maintainers":["a"]}', 'x.hmod').meta, { version: '1', maintainers: [{ login: 'a', id: null }] });
+  assert.deepEqual(parseMeta('{"version":"1","maintainers":[{"login":"a","id":7}]}', 'x.hmod').meta.maintainers, [{ login: 'a', id: 7 }]);
+  // Each maintainer is its own entry, written the way GitHub spells usernames.
+  assert.match(parseMeta('{"version":"1","maintainers":["alice, bob"]}', 'x.hmod').error, /isn't a GitHub username/);
+  assert.match(parseMeta('{"version":"1","maintainers":["@alice"]}', 'x.hmod').error, /isn't a GitHub username/);
+  assert.match(parseMeta('{"version":"1","maintainers":[{"login":"a","id":"x"}]}', 'x.hmod').error, /numeric GitHub user ID/);
+  assert.equal(metaText({ version: '1', maintainers: [{ login: 'a', id: 7 }, 'b'] }), '{\n  "version": "1",\n  "maintainers": [\n    {\n      "login": "a",\n      "id": 7\n    },\n    "b"\n  ]\n}\n');
+});
+
+test('maintainers are matched by GitHub ID, so a re-registered login gets nothing', async () => {
+  const mod = await makeMod('1.0.0');
+  const v1 = await entry(mod, [{ login: 'alice', id: 101 }]);
+  const v2 = await entry(await makeMod('2.0.0'), [{ login: 'alice', id: 101 }]);
+  const before = new Map([['alice.font-tweak.hmod', v1]]);
+  const after = new Map([['alice.font-tweak.hmod', v2]]);
+  // Someone else registered "alice" after she renamed her account.
+  const impostor = await checkSubmission({ before, after, author: { login: 'alice', id: 999 } });
+  assert.match(impostor.errors.join(), /belongs to alice/);
+  // The real Alice, now called alice-renamed, still matches by ID.
+  const real = await checkSubmission({ before, after, author: { login: 'alice-renamed', id: 101 } });
+  assert.deepEqual(real.errors, []);
+  // Older files with only a login still work by login.
+  const legacy = await checkSubmission({ before: new Map([['alice.font-tweak.hmod', await entry(mod, ['alice'])]]), after: new Map([['alice.font-tweak.hmod', await entry(await makeMod('2.0.0'), ['alice'])]]), author: { login: 'alice', id: 101 } });
+  assert.deepEqual(legacy.errors, []);
+  assert.deepEqual(legacy.approvals, []);
+});
+
+test('any change to who maintains a package waits for an admin', async () => {
+  const alice = { login: 'alice', id: 101 };
+  const bob = { login: 'bob', id: 202 };
+  // A new package listing someone besides the submitter.
+  const extra = await checkSubmission({ before: new Map(), after: new Map([['alice.font-tweak.hmod', await entry(await makeMod('1.0.0'), [alice, bob])]]), author: alice });
+  assert.deepEqual(extra.errors, []);
+  assert.match(extra.approvals.join(), /also lists bob \(GitHub ID 202/);
+  // A new package listing only the submitter needs nothing.
+  const solo = await checkSubmission({ before: new Map(), after: new Map([['alice.font-tweak.hmod', await entry(await makeMod('1.0.0'), [alice])]]), author: alice });
+  assert.ok(!solo.approvals.some((a) => /maintainers/.test(a)));
+  // A co-maintainer removing the original author.
+  const before = new Map([['alice.font-tweak.hmod', await entry(await makeMod('1.0.0'), [alice, bob])]]);
+  const kick = await checkSubmission({ before, after: new Map([['alice.font-tweak.hmod', await entry(await makeMod('2.0.0'), [bob])]]), author: bob });
+  assert.deepEqual(kick.errors, []);
+  assert.match(kick.approvals.join(), /changes its maintainers\. Removes alice/);
+  // Recording an ID for an older login-only entry is a change too.
+  const stamp = await checkSubmission({ before: new Map([['alice.font-tweak.hmod', await entry(await makeMod('1.0.0'), ['alice'])]]), after: new Map([['alice.font-tweak.hmod', await entry(await makeMod('2.0.0'), [alice])]]), author: alice });
+  assert.match(stamp.approvals.join(), /changes its maintainers/);
+  // An update that keeps the same maintainers needs nothing.
+  const keep = await checkSubmission({ before, after: new Map([['alice.font-tweak.hmod', await entry(await makeMod('2.0.0'), [alice, bob])]]), author: bob });
+  assert.deepEqual(keep.approvals, []);
 });
 
 test('new, updated and removed packages follow the maintainer and version rules', async () => {
@@ -56,7 +103,23 @@ test('new, updated and removed packages follow the maintainer and version rules'
   ok(adminFix);
 
   const removed = await checkSubmission({ before: new Map([['alice.font-tweak.hmod', v1]]), after: new Map(), author: 'bob' });
-  assert.match(removed.errors.join(), /can't remove/);
+  assert.match(removed.errors.join(), /can't ask to remove/);
+});
+
+test('removing a package is only ever a request for an admin to approve', async () => {
+  const a = await entry(await makeMod('1.0.0'), ['alice']);
+  const one = new Map([['alice.font-tweak.hmod', a]]);
+  const two = new Map([['alice.font-tweak.hmod', a], ['alice.other.hmod', a]]);
+  for (const [before, after] of [[one, new Map()], [two, new Map()], [two, new Map([['alice.other.hmod', a]])]]) {
+    for (const author of ['alice', 'admin']) {
+      const r = await checkSubmission({ before, after, author, admins: ['admin'] });
+      assert.deepEqual(r.errors, [], author);
+      assert.match(r.approvals.join(), /would be removed/, author);
+      assert.match(reportMarkdown(r, author), /Needs admin approval[\s\S]*would be removed/);
+    }
+    const bob = await checkSubmission({ before, after, author: 'bob', admins: ['admin'] });
+    assert.match(bob.errors.join(), /can't ask to remove/);
+  }
 });
 
 test('package content and naming are checked', async () => {
@@ -107,7 +170,7 @@ test('submitting a new package forks, commits and opens a pull request', async (
   assert.match(p.title, /^Add Font Tweak 1\.0\.0$/);
   const files = fake.files('alice/central', p.head.split(':')[1]);
   assert.ok(files[packagePath('alice.font-tweak.hmod')]);
-  assert.deepEqual(JSON.parse(bytesText(files[metaPath('alice.font-tweak.hmod')])), { version: '1.0.0', maintainers: ['alice'] });
+  assert.deepEqual(JSON.parse(bytesText(files[metaPath('alice.font-tweak.hmod')])), { version: '1.0.0', maintainers: [{ login: 'alice', id: 101 }] });
   assert.ok(files['repo.json'], 'the branch starts from the central repository');
   assert.ok(steps.some((s) => /Forking/.test(s)));
 });
@@ -199,6 +262,8 @@ test('ci/check-pr.mjs passes a good pull request and fails a bad one', async () 
     const summary = path.join(tmp, 'summary.md');
     const good = run('check-pr.mjs', ['--base', base, '--head', head, '--author', 'alice', '--summary', summary]);
     assert.equal(good.code, 0, good.out);
+    const withId = run('check-pr.mjs', ['--base', base, '--head', head, '--author', 'alice', '--author-id', '101']);
+    assert.equal(withId.code, 0, withId.out);
     assert.match(fs.readFileSync(summary, 'utf8'), /alice\.font-tweak\.hmod.*added → 1\.0\.0/);
 
     writeTree(head, { 'repo.json': JSON.stringify({ admins: ['mallory'] }), 'packages/notes.txt': 'x' });

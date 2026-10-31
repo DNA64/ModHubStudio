@@ -2,12 +2,35 @@
 import { buildRepoFiles, INDEX_MARKERS } from './repo.js';
 import { packHmod } from './pack.js';
 import { textBytes } from './tar.js';
+import { CENTRAL_REPO } from './project.js';
+
+const sameRepo = (a, b) => !!(a && b) && `${a.owner}/${a.repo}`.toLowerCase() === `${b.owner}/${b.repo}`.toLowerCase();
+const asRepo = (name) => { const [owner, repo] = String(name || '').split('/'); return owner && repo ? { owner, repo } : null; };
+
+// A central repository takes packages only by pull request into packages/.
+// It's marked by a repo.json with an admins list (see src/central.js).
+export function looksCentral(repoJsonText) {
+  if (!repoJsonText) return false;
+  try { const c = JSON.parse(repoJsonText); return !!c && typeof c === 'object' && Array.isArray(c.admins); } catch { return false; }
+}
+const centralMessage = (r) => `${r.owner}/${r.repo} is a central repository. Its site is built from reviewed pull requests, so publishing your own site into it isn't allowed. To add a package there, use Check and then Submit for review under Central repository.`;
 
 // Paths the publisher owns in the target branch. Anything else there (the
 // user's README, LICENSE, other pages) is left alone.
 const MANAGED_DIRS = ['.repo/', 'hmods/', 'games/'];
 export const MAX_FILE_BYTES = 100 * 1024 * 1024; // GitHub's per-file limit
 export const WARN_FILE_BYTES = 50 * 1024 * 1024;
+
+// Package file names a published site lists, from its .repo/<name>/link files
+// (which also covers packages hosted elsewhere through an external link).
+export function publishedPackages(paths) {
+  const out = new Set();
+  for (const p of paths) {
+    const m = /^\.repo\/([^/]+\.(?:hmod|clvg))\/link$/i.exec(p);
+    if (m) out.add(m[1]);
+  }
+  return [...out];
+}
 
 export function cleanDomain(value) {
   return String(value || '').trim().toLowerCase()
@@ -27,8 +50,11 @@ export function pagesUrl({ owner, repo }, cname) {
   return `https://${o}.github.io/${repo}`;
 }
 
-export function pagesIssues(target) {
+// central: the central repository set in the Studio, as { owner, repo }.
+export function pagesIssues(target, { central = null } = {}) {
   const out = [];
+  const r = target.repo;
+  if (r && (sameRepo(r, asRepo(CENTRAL_REPO)) || sameRepo(r, central))) out.push({ severity: 'error', text: centralMessage(r) });
   if (!target.repo) out.push({ severity: 'error', text: 'Enter the GitHub repository to publish to, as owner/name.' });
   if (!String(target.branch || '').trim()) out.push({ severity: 'error', text: 'Enter the branch GitHub Pages publishes from.' });
   const d = cleanDomain(target.cname);
@@ -57,12 +83,29 @@ export async function publishToPages(gh, { target, repoSettings, mods, onProgres
   const info = await gh.maybeRepo(r);
   if (!info) throw new Error(`Couldn't find ${r.owner}/${r.repo}. Create it on GitHub first (it can be empty), or check the name and that the token can see it.`);
   if (info.permissions && !info.permissions.push) throw new Error(`Your account can't write to ${r.owner}/${r.repo}.`);
+  if (sameRepo(r, asRepo(CENTRAL_REPO))) throw new Error(centralMessage(r));
 
   // Keep a custom domain the site already has unless the user typed a new one.
   const head = await gh.branchHead(r, branch);
+  // Any central repository, not only the default one: look for its repo.json
+  // on the branch and on the default branch, before anything is written.
+  const markers = await Promise.all([
+    head ? gh.readText(r, 'repo.json', branch) : null,
+    info.default_branch && info.default_branch !== branch ? gh.readText(r, 'repo.json', info.default_branch) : null,
+  ]);
+  if (markers.some(looksCentral)) throw new Error(centralMessage(r));
   const existingCname = head ? cleanDomain(await gh.readText(r, 'CNAME', branch)) : '';
   const cname = cleanDomain(target.cname) || existingCname;
   const baseUrl = pagesUrl(r, cname);
+
+  // Never empty a site that holds several packages in one go: an empty list is
+  // more likely a fresh, unloaded Studio than an intent to delete everything.
+  if (!mods.length && head) {
+    const published = publishedPackages((await gh.tree(r, head)).entries.map((e) => e.path));
+    if (published.length > 1) {
+      throw new Error(`${r.owner}/${r.repo} has ${published.length} packages, and publishing an empty list would delete all of them. Load the repository's packages, remove the ones you want gone, and publish again. Only the last remaining package can be removed by publishing an empty list.`);
+    }
+  }
 
   onProgress('Packing packages');
   const packed = new Map();

@@ -75,6 +75,46 @@ test('removed packages are deleted, other files in the repository are kept', asy
   assert.ok(r.notes.some((n) => n.kind === 'index'));
 });
 
+test('removing the last package publishes an empty repository', async () => {
+  const { fake, gh } = setup();
+  const [tool] = await mods();
+  await publishToPages(gh, { target: target(), repoSettings: settings, mods: [tool] });
+  await publishToPages(gh, { target: target(), repoSettings: settings, mods: [] });
+  const files = fake.files('alice/hmods', 'main');
+  for (const p of Object.keys(files)) assert.ok(!/^(hmods|games)\//.test(p) && !/^\.repo\/[^/]+\.(hmod|clvg)\//.test(p), `${p} should be gone`);
+  assert.equal(bytesText(files['.repo/list']), '');
+  assert.ok(files['.repo/pack.tgz'], 'Hakchi2 CE still finds a valid, empty pack.tgz');
+});
+
+test('publishing an empty list never wipes a site with several packages', async () => {
+  const { fake, gh } = setup();
+  await publishToPages(gh, { target: target(), repoSettings: settings, mods: await mods() });
+  const commits = fake.commits('alice/hmods', 'main').length;
+  await assert.rejects(publishToPages(gh, { target: target(), repoSettings: settings, mods: [] }), /has 2 packages/);
+  assert.equal(fake.commits('alice/hmods', 'main').length, commits, 'nothing was committed');
+  assert.ok(fake.files('alice/hmods', 'main')['hmods/tool.hmod']);
+});
+
+test('a central repository can never be published over', async () => {
+  // The default central repository, refused before anything is read or written.
+  assert.match(pagesIssues({ repo: { owner: 'dna64', repo: 'modhubrepo' }, branch: 'main' }).map((i) => i.text).join(), /is a central repository/);
+  // The one set in the Studio, under any capitalisation.
+  assert.match(pagesIssues({ repo: { owner: 'Hub', repo: 'Mods' }, branch: 'main' }, { central: { owner: 'hub', repo: 'mods' } }).map((i) => i.text).join(), /is a central repository/);
+  // Any other repository with a central repo.json: nothing is committed.
+  const fake = new FakeGitHub();
+  fake.addRepo('alice/hub', { files: { 'repo.json': JSON.stringify({ title: 'Hub', admins: ['alice'] }), 'packages/.gitkeep': '' } });
+  const gh = createClient({ token: 'tok-alice', fetchImpl: fake.fetch });
+  const before = fake.commits('alice/hub', 'main').length;
+  await assert.rejects(publishToPages(gh, { target: { repo: { owner: 'alice', repo: 'hub' }, branch: 'main', cname: '' }, repoSettings: settings, mods: await mods() }), /is a central repository/);
+  assert.equal(fake.commits('alice/hub', 'main').length, before);
+  // A central repo.json on the default branch also counts when publishing to another branch.
+  await assert.rejects(publishToPages(gh, { target: { repo: { owner: 'alice', repo: 'hub' }, branch: 'site', cname: '' }, repoSettings: settings, mods: await mods() }), /is a central repository/);
+  // A repo.json that isn't a central one doesn't block anything.
+  const { fake: f2, gh: gh2 } = setup({ files: { 'repo.json': '{"name":"something else"}' } });
+  await publishToPages(gh2, { target: target(), repoSettings: settings, mods: await mods() });
+  assert.ok(f2.files('alice/hmods', 'main')['.repo/pack.tgz']);
+});
+
 test('a generated index.html is replaced on the next publish', async () => {
   const { fake, gh } = setup({ files: { 'index.html': `<!doctype html>${INDEX_MARKER}<h1>old</h1>` } });
   await publishToPages(gh, { target: target(), repoSettings: { ...settings, title: 'New title' }, mods: await mods() });

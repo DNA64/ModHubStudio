@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Checks a pull request to a central hmod repository.
-//   node ci/check-pr.mjs --base <dir> --head <dir> --author <login> [--summary <file>]
+//   node ci/check-pr.mjs --base <dir> --head <dir> --author <login> [--author-id <id>] [--summary <file>]
+// --author-id is the numeric GitHub user ID of the pull request's author; with
+// it, maintainers are matched by ID, so a renamed-away login can't be reused.
 // --base is the target branch checked out, --head the pull request. The admin
 // list and namespaces.json come from the base branch, so a pull request can't
 // make itself an admin or grant itself a namespace.
@@ -28,7 +30,7 @@ const otherChanges = [...new Set([...baseFiles.keys(), ...headFiles.keys()])]
 const result = await checkSubmission({
   before: loadPackages(opts.base),
   after: loadPackages(opts.head),
-  author: opts.author,
+  author: opts['author-id'] ? { login: opts.author, id: Number(opts['author-id']) } : opts.author,
   admins: config.admins || [],
   maxMB: Number(config.maxPackageMB) || DEFAULT_MAX_MB,
   otherChanges,

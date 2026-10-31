@@ -97,6 +97,15 @@ test('the repository has everything Hakchi2 CE and the console read', async () =
   assert.equal(meta.length, mods.length * 4);
 });
 
+test('a repository with no packages is valid and empty', async () => {
+  assert.ok(!repoIssues({ baseUrl: 'https://x.io' }, []).some((i) => i.severity === 'error'));
+  const files = Object.fromEntries((await buildRepoFiles({ baseUrl: 'https://x.io' }, [], new Map())).map((f) => [f.path, f.data]));
+  assert.equal(bytesText(files['.repo/list']), '');
+  const entries = parseTar(await gunzip(files['.repo/pack.tgz'])).map((e) => e.path);
+  assert.deepEqual(entries.sort(), ['list', 'readme.md']);
+  assert.ok(!Object.keys(files).some((p) => /^(hmods|games)\//.test(p)));
+});
+
 test('an external download link replaces the hosted copy', async () => {
   const [theme] = await sampleMods();
   const ext = { ...theme, externalUrl: 'https://github.com/me/sky/releases/download/v1/Night_Sky.hmod' };

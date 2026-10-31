@@ -6,8 +6,9 @@ const sha1 = (data) => crypto.createHash('sha1').update(data).digest('hex');
 const blobSha = (buf) => sha1(Buffer.concat([Buffer.from(`blob ${buf.length}\0`), buf]));
 
 export class FakeGitHub {
-  constructor({ users = { 'tok-alice': 'alice' } } = {}) {
+  constructor({ users = { 'tok-alice': 'alice' }, userIds = { alice: 101, bob: 202 } } = {}) {
     this.users = users;          // token -> login
+    this.userIds = userIds;      // login -> numeric GitHub user ID
     this.repos = new Map();      // "owner/name" -> repo
     this.objects = new Map();    // sha -> { type, ... }
     this.pulls = [];
@@ -80,7 +81,7 @@ export class FakeGitHub {
   }
 
   route(method, path, query, body, login) {
-    if (method === 'GET' && path === '/user') return [200, { login }];
+    if (method === 'GET' && path === '/user') return [200, { login, id: this.userIds?.[login] }];
     const m = path.match(/^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/);
     if (!m) return [404, { message: 'Not Found' }];
     const full = `${m[1]}/${m[2]}`;

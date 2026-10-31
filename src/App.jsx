@@ -8,6 +8,7 @@ import { exampleMods } from './examples.js';
 import { createClient, parseRepoName } from './github.js';
 import { publishToPages, pagesUrl, pagesIssues } from './publish.js';
 import { prepareSubmission, submitToCentral } from './submit.js';
+import { names } from './central.js';
 import { CENTRAL_REPO, CENTRAL_TITLE, STUDIO_URL } from './project.js';
 import { isPackageId, suggestPackageId } from './packageid.js';
 
@@ -434,7 +435,7 @@ function SubmitItem({ mod, issues, central, github, notify, open }) {
             <>
               <button className="btn btn-small" disabled={!ready || !!busy} onClick={check}>{busy === 'check' ? 'Checking…' : prep ? 'Check again' : 'Check'}</button>
               {prep && !prep.result.errors.length && (
-                <button className="btn btn-small btn-primary" disabled={!!busy} onClick={submit}>{busy === 'submit' ? 'Submitting…' : 'Open pull request'}</button>
+                <button className="btn btn-small btn-primary" disabled={!!busy} onClick={submit}>{busy === 'submit' ? 'Submitting…' : 'Submit for review'}</button>
               )}
             </>
           )}
@@ -446,7 +447,7 @@ function SubmitItem({ mod, issues, central, github, notify, open }) {
         <div className="submission">
           <p className="small">
             {prep.isUpdate ? `Updates ${prep.file} from ${prep.prev.version} to ${prep.meta.version || '?'}` : `Adds ${prep.file} at version ${prep.meta.version || '?'}`}
-            {' '}to {prep.config.title}. Maintainers: {prep.meta.maintainers.join(', ')}.
+            {' '}to {prep.config.title}. Maintainers: {names(prep.meta.maintainers)}.
             {' '}{prep.canPush ? 'Sent as a branch in the repository.' : `Sent from a fork in your account (${prep.me.login}/${central.repo}).`}
           </p>
           {prep.result.errors.length > 0 && <ul className="plain-issues">{prep.result.errors.map((t, i) => <li key={i} className="callout callout-error">{t}</li>)}</ul>}
@@ -603,10 +604,11 @@ export function siteAddress(repo) {
 }
 
 function PagesPublish({ repo, setRepo, mods, github, notify, blocking }) {
+  const centralRepo = parseRepoName(repo.central);
   const pages = repo.pages || { repo: '', branch: 'main', cname: '' };
   const setPages = (patch) => setRepo({ ...repo, pages: { ...pages, ...patch } });
   const target = parseRepoName(pages.repo);
-  const problems = pagesIssues({ repo: target, branch: pages.branch, cname: pages.cname });
+  const problems = pagesIssues({ repo: target, branch: pages.branch, cname: pages.cname }, { central: centralRepo });
   const [busy, setBusy] = useState(false);
   const [steps, setSteps] = useState([]);
   const [result, setResult] = useState(null);
@@ -785,7 +787,8 @@ function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
         </div>
 
         <div className="stack panel">
-          <h3>Your Mod Hub site</h3>
+          <h3>Your own Mod Hub site</h3>
+          <p className="muted small">For a repository you run yourself. It publishes every package loaded here, as they are, with no review. To add a package to the central repository, use <b>Central repository</b> below instead.</p>
           <div className="kind-row">
             <div className="segmented" role="radiogroup" aria-label="Where the repository is hosted">
               {[['pages', 'GitHub Pages'], ['own', 'My own web host']].map(([k, label]) => (
@@ -822,7 +825,7 @@ function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
 
         <div className="stack panel">
           <h3>Central repository</h3>
-          <p className="muted small">Each submission becomes a pull request. Its maintainers review it, and its checks run the same rules as this tool plus version and maintainer rules. Each package is checked here first, so one that would be rejected never becomes a pull request.</p>
+          <p className="muted small">To add or update a package here, click <b>Check</b> next to it, then <b>Submit for review</b>. That opens a pull request: nothing is added until an admin reviews and merges it. Its checks run the same rules as this tool plus version and maintainer rules, and each package is checked here first, so one that would be rejected is never sent.</p>
           <label className="field central-field"><span>Central repository on GitHub</span>
             <input id="central-repo" value={repo.central || ''} placeholder={CENTRAL_REPO} spellCheck="false"
               onChange={(e) => setRepo({ ...repo, central: e.target.value })} />

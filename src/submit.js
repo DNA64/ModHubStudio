@@ -2,7 +2,7 @@
 import { packHmod, hmodFileName } from './pack.js';
 import { textBytes } from './tar.js';
 import { STUDIO_URL } from './project.js';
-import { checkSubmission, packagePath, metaPath, parseMeta, metaText, parseNamespaces, DEFAULT_MAX_MB, NAMESPACES_FILE, PACKAGES_DIR } from './central.js';
+import { checkSubmission, packagePath, metaPath, parseMeta, metaText, parseNamespaces, names, DEFAULT_MAX_MB, NAMESPACES_FILE, PACKAGES_DIR } from './central.js';
 import { kindFromFileName } from './model.js';
 import { idOf, partsOf, namespaceOf, squash } from './packageid.js';
 
@@ -65,7 +65,8 @@ export async function prepareSubmission(gh, { central, mod }) {
   const prevText = await gh.readText(central, metaPath(file), upstream.default_branch);
   const prev = prevText ? parseMeta(prevText, file).meta || null : null;
   const version = submissionVersion(mod);
-  const meta = { version, maintainers: prev ? prev.maintainers : [me.login] };
+  const self = me.id ? { login: me.login, id: me.id } : me.login;
+  const meta = { version, maintainers: prev ? prev.maintainers : [self] };
   const bytes = await packHmod(mod);
   if (!version) {
     const result = { errors: ['Add a Version in the Readme tab. The central repository uses it to tell updates apart.'], warnings: [], approvals: [], changes: [] };
@@ -74,7 +75,7 @@ export async function prepareSubmission(gh, { central, mod }) {
   const result = await checkSubmission({
     before: prev ? new Map([[file, { bytes: new Uint8Array(0), metaText: prevText }]]) : new Map(),
     after: new Map([[file, { bytes, metaText: metaText(meta) }]]),
-    author: me.login,
+    author: self,
     admins: config.admins,
     maxMB: config.maxPackageMB,
     existing,
@@ -139,7 +140,7 @@ export async function submitToCentral(gh, { central, mod, prepared = null, onPro
       `- Kind: ${mod.kind === 'game' ? 'game (.clvg)' : 'mod (.hmod)'}`,
       mod.readme.front.Creator ? `- Creator: ${mod.readme.front.Creator}` : null,
       mod.readme.front.Consoles ? `- Consoles: ${mod.readme.front.Consoles}` : null,
-      `- Maintainers: ${p.meta.maintainers.join(', ')}`,
+      `- Maintainers: ${names(p.meta.maintainers)}`,
       '',
       `Submitted with [Mod Hub Studio](${STUDIO_URL}). The repository's checks run again on this pull request.`,
     ].filter((l) => l !== null).join('\n') + approvals + warnings,
