@@ -2,8 +2,12 @@ name: Check packages
 
 # Runs Mod Hub Studio's rules on every pull request: the same hakchi
 # install checks the tool shows, plus version and maintainer rules.
+#
+# pull_request_target runs this file as it is on the default branch, never a
+# copy edited inside the pull request, so a pull request can't change or skip
+# its own check. The pull request's files are only read as data, never run.
 on:
-  pull_request:
+  pull_request_target:
 
 permissions:
   contents: read
@@ -21,13 +25,17 @@ jobs:
       - name: Check out the pull request
         uses: actions/checkout@v4
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
           path: head
+          persist-credentials: false
 
       - name: Check out the target branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
+          persist-credentials: false
 
       - name: Check out the publisher
         uses: actions/checkout@v4
@@ -35,6 +43,7 @@ jobs:
           repository: ${{ env.PUBLISHER_REPO }}
           ref: ${{ env.PUBLISHER_REF }}
           path: publisher
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -47,4 +56,5 @@ jobs:
       - name: Check the packages
         env:
           AUTHOR: ${{ github.event.pull_request.user.login }}
-        run: node publisher/ci/check-pr.mjs --base base --head head --author "$AUTHOR" --summary "$GITHUB_STEP_SUMMARY"
+          AUTHOR_ID: ${{ github.event.pull_request.user.id }}
+        run: node publisher/ci/check-pr.mjs --base base --head head --author "$AUTHOR" --author-id "$AUTHOR_ID" --summary "$GITHUB_STEP_SUMMARY"
