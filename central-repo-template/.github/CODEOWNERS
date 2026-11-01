@@ -1,3 +1,6 @@
+# Every change to this repository needs DNA64's review.
+*           @DNA64
+
 # Changes to the workflows and repository settings need an admin's review.
 /.github/   @DNA64
 /repo.json  @DNA64
