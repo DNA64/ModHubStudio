@@ -706,21 +706,21 @@ function ImportPane({ repo, hasPackages, onImported, onClose }) {
         <div className="stack panel">
           <h3>By address</h3>
           <label className="field"><span>Site address</span>
-            <input id="import-url" value={address} placeholder="https://mods.example.com" spellCheck="false" disabled={busy}
+            <input id="import-url" value={address} placeholder="https://example.com" spellCheck="false" disabled={busy}
               onChange={(e) => setAddress(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !busy) byAddress(); }} />
             <small className="muted">The address users add in Hakchi2 CE, the folder that holds <code>.repo</code>.</small>
           </label>
           <div className="row">
             <button className="btn btn-primary" disabled={busy || !address.trim()} onClick={byAddress}>{busy ? 'Opening…' : 'Open'}</button>
           </div>
-          <p className="muted small">A page can only read another site's files when that site allows it with an <code>Access-Control-Allow-Origin</code> header. Most hosts don't send one; if the site is one of them, open a copy of it instead.</p>
+          <p className="muted small">A page can only read another site's files when that site allows it with an <code>Access-Control-Allow-Origin</code> header. Most hosts don't send one; if this site is one of them, open a copy of it instead.</p>
         </div>
         <div className="stack panel">
           <h3>From a copy of the site</h3>
-          <p className="muted small">A folder or ZIP holding the site's <code>.repo</code> folder, and the package files where they sit on the site (for example <code>nimbus/Mods/…</code>). Packages that aren't in the copy are downloaded from their links if the host allows it, or listed as before. Just the <code>.repo</code> folder works too.</p>
+          <p className="muted small">A folder or ZIP holding the site's <code>.repo</code> folder, and the package files where they sit on the site (for example <code>https://example.com/mods</code>). Packages that aren't in the copy are downloaded from their links if the host allows it, or listed as before. Just the <code>.repo</code> folder works too.</p>
           <div className="row">
             <button className="btn" disabled={busy} onClick={() => folderInput.current.click()}>Select the site folder</button>
-            <button className="btn" disabled={busy} onClick={() => zipInput.current.click()}>Select a ZIP of it</button>
+            <button className="btn" disabled={busy} onClick={() => zipInput.current.click()}>Select a ZIP file</button>
           </div>
           <input ref={folderInput} type="file" hidden webkitdirectory="" directory=""
             onChange={(e) => { const fl = [...e.target.files]; e.target.value = ''; if (fl.length) pickFolder(fl); }} />
