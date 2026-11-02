@@ -4,10 +4,10 @@ import crypto from 'node:crypto';
 import SevenZip from '7z-wasm';
 import { tgz, zip, desktop, readme, bytesText, textBytes, ids } from './helpers.js';
 import { buildTar, gzip, gunzip, parseTar } from '../src/tar.js';
-import { importRepository, parseRepoPack, readRepositoryIndex, siteFromFiles, siteFromAddress, guessBase, attachFile } from '../src/import.js';
+import { importRepository, parseRepoPack, readRepositoryIndex, siteFromFiles, siteFromAddress, guessBase, attachFile, parseHrepo, addressForCopy } from '../src/import.js';
 import { applyAllFixes, validate } from '../src/rules.js';
 import { packPackage, hmodFileName } from '../src/pack.js';
-import { buildRepoFiles, repoIssues, packagePlacement, siteFolders, defaultFolder, staleFiles } from '../src/repo.js';
+import { buildRepoFiles, repoIssues, packagePlacement, siteFolders, defaultFolder, staleFiles, sitePath } from '../src/repo.js';
 import { modFromArchive, isUnchanged } from '../src/model.js';
 
 globalThis.SevenZip = SevenZip;
@@ -267,6 +267,66 @@ test('a copy of the site is opened from its folder, wherever .repo sits', async 
   assert.equal(r2.mods.length, 5);
   assert.ok(r2.mods.every((m) => m.unavailable));
   assert.throws(() => siteFromFiles([{ path: 'x/readme.md', data: textBytes('') }]), /isn't a copy of a Mod Hub repository/);
+});
+
+test("a copy of just the repository's files is read without a .repo folder around them", async () => {
+  const { files } = await site();
+  const pack = files['.repo/pack.tgz'];
+  // A ZIP of the .repo folder's contents: pack.tgz, list and friends at the top.
+  const flat = siteFromFiles([
+    { path: 'pack.tgz', data: pack },
+    { path: 'list', data: textBytes('silent_cursor.hmod\n') },
+    { path: 'readme.md', data: textBytes('hi') },
+    { path: 'boothome.hmod/link', data: textBytes(`${BASE}/nimbus/Mods/boothome.hmod`) },
+  ]);
+  assert.equal((await readRepositoryIndex(flat.readFile)).items.length, 5);
+  assert.ok(await flat.readFile('.repo/readme.md'));
+
+  // The same files in a folder not called .repo, next to the site's other folders.
+  const named = siteFromFiles([
+    { path: 'backup/repo/pack.tgz', data: pack },
+    { path: 'backup/nimbus/Mods/boothome.hmod', data: files['nimbus/Mods/boothome.hmod'] },
+  ]);
+  const index = await readRepositoryIndex(named.readFile);
+  assert.equal(guessBase(index.items.map((i) => i.link), named.match), BASE);
+  const r = await importRepository({ base: BASE, readFile: named.readFile, localFile: named.localFile });
+  assert.ok(!r.mods.find((m) => m.origin.fileName === 'boothome.hmod').unavailable);
+
+  // A real .repo folder still wins over a stray pack.tgz elsewhere.
+  const both = siteFromFiles([{ path: 'site/.repo/pack.tgz', data: pack }, { path: 'pack.tgz', data: textBytes('x') }]);
+  assert.equal((await both.readFile('.repo/pack.tgz')).length, pack.length);
+  // A file that merely ends in "list" doesn't count.
+  assert.throws(() => siteFromFiles([{ path: 'playlist', data: textBytes('') }]), /isn't a copy/);
+});
+
+test('a .hrepo file in the copy gives the site address and name', async () => {
+  assert.deepEqual(parseHrepo('---\nName: ModMyClassic Repository\nLink: http://classicmods.net/\n---\n'), { name: 'ModMyClassic Repository', link: 'http://classicmods.net' });
+  assert.deepEqual(parseHrepo('\r\n---\r\nName: X\r\nLink: https://x.example/repo/\r\n---'), { name: 'X', link: 'https://x.example/repo' });
+  assert.equal(parseHrepo('---\nName: no link\n---\n'), null);
+
+  const { files } = await site();
+  // Only the repository's files, like a ZIP of .repo with the site's .hrepo in it.
+  const hrepo = textBytes(`---\nName: Test Repository\nLink: ${BASE.replace('https:', 'http:')}/\n---\n`);
+  const copy = siteFromFiles([{ path: 'pack.tgz', data: files['.repo/pack.tgz'] }, { path: 'test.hrepo', data: hrepo }]);
+  const index = await readRepositoryIndex(copy.readFile);
+  const links = index.items.map((i) => i.link);
+  const got = await addressForCopy(copy, links);
+  assert.equal(got.base, BASE, 'the links use https, so https is kept');
+  assert.equal(got.title, 'Test Repository');
+  assert.equal(got.from, 'hrepo');
+  assert.equal((await addressForCopy(copy, links, 'https://typed.example')).base, 'https://typed.example', 'a typed address wins');
+  const r = await importRepository({ base: got.base, title: got.title, readFile: copy.readFile, localFile: copy.localFile });
+  assert.equal(r.repo.title, 'Test Repository');
+  assert.equal(r.repo.baseUrl, BASE);
+
+  // Without a .hrepo or package files, there's nothing to go on.
+  const bare = siteFromFiles([{ path: 'pack.tgz', data: files['.repo/pack.tgz'] }]);
+  assert.equal((await addressForCopy(bare, links)).base, '');
+});
+
+test('http and https links count as the same site', () => {
+  assert.equal(sitePath('http://classicmods.net', 'https://classicmods.net/nimbus/Mods/a.hmod'), 'nimbus/Mods/a.hmod');
+  assert.equal(sitePath('https://a.example', 'https://b.example/x'), null);
 });
 
 test('a site address with odd characters in links still matches the copy', async () => {

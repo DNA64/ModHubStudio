@@ -50,9 +50,12 @@ const encodePath = (p) => p.split('/').map(encodeURIComponent).join('/');
 
 // The path of a link on this site, relative to its address, or null when the
 // link points somewhere else.
+// http and https count as the same site: a repository added as http:// often
+// links its packages over https.
 export function sitePath(base, link) {
-  const b = normalizeBase(base);
-  const l = String(link || '').trim();
+  const noScheme = (u) => u.replace(/^https?:\/\//i, '');
+  const b = noScheme(normalizeBase(base));
+  const l = noScheme(String(link || '').trim());
   if (!b || !l.toLowerCase().startsWith(b.toLowerCase() + '/')) return null;
   try { return decodeURIComponent(l.slice(b.length + 1).split(/[?#]/)[0]); } catch { return null; }
 }

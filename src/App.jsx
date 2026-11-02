@@ -3,7 +3,7 @@ import { TARGETS, TARGET_IDS, resolveTargets, detectTargets } from './targets.js
 import { validate, applyFix, applyAllFixes, AUTO_FIX_IDS, destination, fileMode, cleanName, OVERLAY_ROOTS, CONTROL_FILES } from './rules.js';
 import { packPackage, hmodFileName, readmeText, serverFileName, keepsOriginal } from './pack.js';
 import { buildRepoFiles, buildRepoZip, repoIssues, modLink, normalizeBase, packagePlacement, siteFolders, defaultFolder, staleFiles } from './repo.js';
-import { importRepository, readRepositoryIndex, siteFromFiles, siteFromAddress, guessBase, attachFile } from './import.js';
+import { importRepository, readRepositoryIndex, siteFromFiles, siteFromAddress, addressForCopy, attachFile } from './import.js';
 import { readZip } from './archive.js';
 import { isZip } from './tar.js';
 import { CATEGORIES, STANDARD_FIELDS, MANAGED_FIELDS } from './readme.js';
@@ -673,13 +673,13 @@ function ImportPane({ repo, hasPackages, onImported, onClose }) {
   const fromCopy = (files) => run(async () => {
     const site = siteFromFiles(files, address);
     const index = await readRepositoryIndex(site.readFile);
-    const base = normalizeBase(address) || guessBase(index.items.map((i) => i.link), site.match);
-    if (!base) throw new Error('The links in this repository don\'t point to files in the copy, so its address can\'t be worked out. Enter the site address above and open it again.');
+    const { base, title } = await addressForCopy(site, index.items.map((i) => i.link), address);
+    if (!base) throw new Error('The copy has no .hrepo file and its links don\'t point to files in it, so the site address can\'t be worked out. Enter it above and open the copy again.');
     if (!address) setAddress(base);
     site.setBase(base);
     // Packages that aren't in the copy are fetched from their links where the host allows it.
     const live = siteFromAddress(base);
-    return importRepository({ base, readFile: site.readFile, localFile: site.localFile, download: live.download, onProgress: progress });
+    return importRepository({ base, title, readFile: site.readFile, localFile: site.localFile, download: live.download, onProgress: progress });
   });
 
   const pickFolder = (fileList) => fromCopy([...fileList].map((f) => ({ path: f.webkitRelativePath || f.name, data: f })));

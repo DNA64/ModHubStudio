@@ -9,7 +9,7 @@ import { parseTar, gunzip, isGzip, looksLikeTar, bytesText } from './tar.js';
 import { modFromArchive, makeMod, kindFromFileName, baseName, remember, setKind } from './model.js';
 import { parseReadme } from './readme.js';
 import { formatFromFileName } from './archive.js';
-import { normalizeBase, md5Hex, sha1Hex } from './repo.js';
+import { normalizeBase, md5Hex, sha1Hex, sitePath } from './repo.js';
 
 const ITEM_RE = /^(?:\.\/)?([^/]+)\/(extract|link|md5|sha1|readme(?:\.(?:md|txt))?)$/i;
 const README_NAMES = ['readme.md', 'readme.txt', 'readme'];
@@ -155,7 +155,7 @@ export async function attachFile(mod, bytes) {
 //   readFile     (path relative to the site) -> bytes or null
 //   localFile    (link) -> bytes or null, for a copy of the site on this computer
 //   download     (link) -> bytes, throws when it can't
-export async function importRepository({ base, readFile, localFile = null, download = null, onProgress = () => {} }) {
+export async function importRepository({ base, title = '', readFile, localFile = null, download = null, onProgress = () => {} }) {
   onProgress('Reading the repository');
   const index = await readRepositoryIndex(readFile);
   const problems = [...index.problems];
@@ -184,7 +184,7 @@ export async function importRepository({ base, readFile, localFile = null, downl
     repo: {
       baseUrl: normalizeBase(base),
       readme: index.readme,
-      title: host || 'Imported repository',
+      title: title || host || 'Imported repository',
       imported: { at: new Date().toISOString(), packages: mods.map((m) => ({ fileName: m.origin.fileName, link: m.origin.link, kind: kindFromFileName(m.origin.fileName) })) },
     },
     summary: `${plural(mods.length, 'package')} read from ${index.from === 'pack.tgz' ? '.repo/pack.tgz' : '.repo/list'}${mods.some((m) => m.unavailable) ? `, ${mods.filter((m) => m.unavailable).length} without their file` : ''}.`,
@@ -201,14 +201,33 @@ export async function importRepository({ base, readFile, localFile = null, downl
 export function siteFromFiles(files, address = '') {
   const map = new Map(files.map((f) => [f.path.replace(/\\/g, '/'), f.data]));
   const bytesOf = async (v) => (v == null ? null : v instanceof Uint8Array ? v : new Uint8Array(await v.arrayBuffer()));
-  let root = null;
-  for (const p of map.keys()) {
-    const m = /^(.*?)\.repo\/(pack\.tgz|list)$/.exec(p);
-    if (m && (root == null || m[1].length < root.length)) root = m[1];
-  }
-  if (root == null) throw new Error('There\'s no .repo/pack.tgz or .repo/list in it, so it isn\'t a copy of a Mod Hub repository.');
+  // The site root is the folder holding .repo. A copy of just the repository's
+  // files, with or without the .repo folder around them (a ZIP of its contents,
+  // or a folder named something else), is taken as .repo itself.
+  const shallowest = (re) => {
+    let best = null;
+    for (const p of map.keys()) {
+      const m = re.exec(p);
+      if (m && (best == null || m[1].length < best.length)) best = m[1];
+    }
+    return best;
+  };
   const site = new Map();
-  for (const [p, d] of map) if (p.startsWith(root)) site.set(p.slice(root.length), d);
+  const root = shallowest(/^(.*?)\.repo\/(?:pack\.tgz|list)$/);
+  if (root != null) {
+    for (const [p, d] of map) if (p.startsWith(root)) site.set(p.slice(root.length), d);
+  } else {
+    let repoDir = shallowest(/^(.*?)pack\.tgz$/);
+    if (repoDir == null) repoDir = shallowest(/^(.*?)list$/);
+    if (repoDir != null && repoDir !== '' && !repoDir.endsWith('/')) repoDir = null;
+    if (repoDir == null) throw new Error('There\'s no pack.tgz or list in it, so it isn\'t a copy of a Mod Hub repository.');
+    // Files beside that folder are the rest of the site.
+    const parent = repoDir ? repoDir.slice(0, repoDir.slice(0, -1).lastIndexOf('/') + 1) : null;
+    for (const [p, d] of map) {
+      if (p.startsWith(repoDir)) site.set(`.repo/${p.slice(repoDir.length)}`, d);
+      else if (parent != null && p.startsWith(parent)) site.set(p.slice(parent.length), d);
+    }
+  }
   const readFile = async (rel) => bytesOf(site.get(rel));
 
   // The longest tail of a link's path that is a file in the copy.
@@ -224,18 +243,43 @@ export function siteFromFiles(files, address = '') {
   let base = normalizeBase(address);
   const localFile = async (link) => {
     if (base) {
-      const b = base + '/';
-      if (link.toLowerCase().startsWith(b.toLowerCase())) {
-        try {
-          const rel = decodeURIComponent(link.slice(b.length).split(/[?#]/)[0]);
-          if (site.has(rel)) return bytesOf(site.get(rel));
-        } catch { /* fall through */ }
-      }
+      const rel = sitePath(base, link);
+      if (rel != null && site.has(rel)) return bytesOf(site.get(rel));
     }
     const rel = match(link);
     return rel ? bytesOf(site.get(rel)) : null;
   };
-  return { readFile, localFile, match, setBase: (b) => { base = normalizeBase(b); } };
+  // A .hrepo file (what Hakchi2 CE takes to add a repository) names the site.
+  const hrepoPath = [...map.keys()].filter((p) => /\.hrepo$/i.test(p)).sort((a, b) => a.split('/').length - b.split('/').length)[0];
+  const readHrepo = async () => (hrepoPath ? parseHrepo(bytesText(await bytesOf(map.get(hrepoPath)))) : null);
+  return { readFile, localFile, match, readHrepo, setBase: (b) => { base = normalizeBase(b); } };
+}
+
+// A .hrepo file, as Hakchi2 CE reads it (MainForm.cs): Name and Link in front matter.
+//   ---
+//   Name: ModMyClassic Repository
+//   Link: http://classicmods.net/
+//   ---
+export function parseHrepo(text) {
+  const { front } = parseReadme(String(text || '').trimStart());
+  const link = normalizeBase(front.Link || '');
+  if (!/^https?:\/\/[^/\s]+/i.test(link)) return null;
+  return { name: (front.Name || '').trim(), link };
+}
+
+// The site address for a copy: the one typed in, else the copy's .hrepo, else
+// the address that makes the most links point into the copy. When the links use
+// the other scheme (http/https) for the same address, theirs is used.
+export async function addressForCopy(site, links, typed = '') {
+  const hrepo = await site.readHrepo();
+  let base = normalizeBase(typed) || (hrepo && hrepo.link) || guessBase(links, site.match);
+  if (base) {
+    const same = links.filter((l) => sitePath(base, l) != null);
+    const https = same.filter((l) => /^https:/i.test(l.trim())).length;
+    if (same.length && https * 2 > same.length) base = base.replace(/^http:/i, 'https:');
+    else if (same.length && https * 2 < same.length) base = base.replace(/^https:/i, 'http:');
+  }
+  return { base, title: (hrepo && hrepo.name) || '', from: normalizeBase(typed) ? 'typed' : hrepo ? 'hrepo' : base ? 'links' : null };
 }
 
 // The site address that makes the most links point into the copy.
