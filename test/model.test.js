@@ -11,9 +11,10 @@ import { validate } from '../src/rules.js';
 const MOD = { 'readme.md': FULL_README, uninstall: 'rm -f x\n', 'etc/preinit.d/p8000_x': 'echo x\n' };
 const GAME = { 'CLV-H-ABCDE.desktop': desktop('CLV-H-ABCDE', '/bin/clover-kachikachi-wr /var/games/CLV-H-ABCDE/game.nes'), 'CLV-H-ABCDE/game.nes': new Uint8Array(16) };
 
-test('only .hmod and .clvg files are accepted', async () => {
-  await assert.rejects(modFromArchive('thing.zip', await tgz(MOD)), /\.hmod or \.clvg/);
-  await assert.rejects(modFromArchive('thing.tar.gz', await tgz(MOD)), /\.hmod or \.clvg/);
+test('only .hmod, .clvg, .zip and .7z files are accepted', async () => {
+  await assert.rejects(modFromArchive('thing.tar.gz', await tgz(MOD)), /\.hmod, \.clvg, \.zip, \.7z/);
+  // A .zip that is really a tar.gz is read, and packed as the tar.gz it is.
+  assert.equal((await modFromArchive('thing.zip', await tgz(MOD))).format, null);
   await assert.rejects(modFromArchive('broken.hmod', textBytes('not an archive')), /tar\.gz/);
 });
 

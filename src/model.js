@@ -1,5 +1,6 @@
 import { parseTar, gunzip, isGzip, isZip, looksLikeTar, bytesText } from './tar.js';
 import { parseReadme } from './readme.js';
+import { is7z, read7z, readZip, formatFromFileName, FORMATS, FORMAT_EXTENSIONS } from './archive.js';
 
 let nextId = 1;
 export const newId = () => `m${nextId++}`;
@@ -9,42 +10,40 @@ export const KINDS = {
   hmod: { ext: '.hmod', label: 'Module' },
   game: { ext: '.clvg', label: 'Game' },
 };
-export const ACCEPTED_EXTENSIONS = Object.values(KINDS).map((k) => k.ext);
+// Package files the Studio opens: the two kinds, plus ZIP and 7z archives,
+// which Hakchi2 CE also installs and which are kept in their own format.
+export const ACCEPTED_EXTENSIONS = [...Object.values(KINDS).map((k) => k.ext), ...FORMAT_EXTENSIONS];
 
 const README_RE = /^(readme\.md|readme\.txt|readme)$/i;
 
 export function kindFromFileName(fileName) {
-  const lower = fileName.toLowerCase();
+  const lower = stripFormat(fileName).toLowerCase();
   for (const [kind, k] of Object.entries(KINDS)) if (lower.endsWith(k.ext)) return kind;
   return null;
 }
 
-export function baseName(fileName) {
-  return fileName.replace(/\.(hmod|clvg)$/i, '');
+// "x.zip" -> "x", "x.hmod.7z" -> "x.hmod"
+function stripFormat(fileName) {
+  return String(fileName).replace(/\.(zip|7z)$/i, '');
 }
+
+export function baseName(fileName) {
+  return stripFormat(fileName).replace(/\.(hmod|clvg)$/i, '');
+}
+
+// True for a file name the Studio opens as a package.
+export const isPackageFileName = (name) => !!(kindFromFileName(name) || formatFromFileName(name));
 
 function cleanLeading(p) {
   return p.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
 }
 
-const isArchive = (u8) => isGzip(u8) || isZip(u8) || looksLikeTar(u8);
+const isArchive = (u8) => isGzip(u8) || isZip(u8) || is7z(u8) || looksLikeTar(u8);
 
 // Raw archive bytes -> entries. Throws when the bytes aren't an archive.
 async function entriesFromBytes(u8, label) {
-  if (isZip(u8)) {
-    const zip = await globalThis.JSZip.loadAsync(u8);
-    const entries = [];
-    for (const [path, entry] of Object.entries(zip.files)) {
-      if (entry.dir) continue;
-      const unixMode = entry.unixPermissions ? entry.unixPermissions & 0o7777 : null;
-      const isLink = entry.unixPermissions && (entry.unixPermissions & 0o170000) === 0o120000;
-      const data = await entry.async('uint8array');
-      entries.push(isLink
-        ? { path, type: 'symlink', data: new Uint8Array(0), mode: 0o777, linkname: bytesText(data) }
-        : { path, type: 'file', data, mode: unixMode });
-    }
-    return { entries, container: 'zip' };
-  }
+  if (isZip(u8)) return { entries: await readZip(u8), container: 'zip' };
+  if (is7z(u8)) return { entries: await read7z(u8, label), container: '7z' };
   if (isGzip(u8)) {
     const inner = await gunzip(u8);
     if (looksLikeTar(inner)) return { entries: parseTar(inner), container: 'tgz' };
@@ -52,7 +51,7 @@ async function entriesFromBytes(u8, label) {
     return { entries: [{ path: label, type: 'file', data: inner }], container: 'gz' };
   }
   if (looksLikeTar(u8)) return { entries: parseTar(u8), container: 'tar' };
-  throw new Error(`${label} isn't a tar.gz archive, so it can't be read as a package.`);
+  throw new Error(`${label} isn't a tar.gz, ZIP or 7z archive, so it can't be read as a package.`);
 }
 
 // A package whose only real content is another archive (for example the .tar that
@@ -69,7 +68,7 @@ async function unwrapNested(entries, name) {
       const stem = name.toLowerCase();
       target = files.find((e) => {
         const p = cleanLeading(e.path).toLowerCase();
-        return !p.includes('/') && p.replace(/\.(tar|gz|tgz|tar\.gz|hmod|clvg)$/, '') === stem && isArchive(e.data);
+        return !p.includes('/') && p.replace(/\.(tar|gz|tgz|tar\.gz|hmod|clvg|zip|7z)$/, '') === stem && isArchive(e.data);
       }) || null;
     }
     if (!target) break;
@@ -177,15 +176,37 @@ function chooseKind(nameKind, entries) {
 
 export async function modFromArchive(fileName, u8) {
   const nameKind = kindFromFileName(fileName);
-  if (!nameKind) {
-    throw new Error(`${fileName} was skipped. Hakchi2 CE packages end in ${ACCEPTED_EXTENSIONS.join(' or ')}; rename it if it is one.`);
+  const nameFormat = formatFromFileName(fileName);
+  if (!nameKind && !nameFormat) {
+    throw new Error(`${fileName} was skipped. Hakchi2 CE packages end in ${ACCEPTED_EXTENSIONS.join(', ')}; rename it if it is one.`);
   }
   const name = baseName(fileName);
   const first = await entriesFromBytes(u8, fileName);
   const { entries, notes } = await unwrapNested(first.entries, name);
   const k = chooseKind(nameKind, entries);
-  return makeMod({ name, kind: k.kind, entries, source: { kind: first.container, fileName, nested: notes, kindFrom: k.kindFrom, kindMismatch: k.mismatch } });
+  const mod = makeMod({ name, kind: k.kind, entries, source: { kind: first.container, fileName, nested: notes, kindFrom: k.kindFrom, kindMismatch: k.mismatch } });
+  // A .zip or .7z file stays one, as long as that's really what it holds.
+  return remember({ ...mod, format: nameFormat && nameFormat === first.container && !notes.length ? nameFormat : null }, u8);
 }
+
+// What a package looked like when it was opened, so an unchanged one can be
+// published byte for byte (its hashes and download stay the same).
+function stateKey(mod) {
+  return JSON.stringify({ name: mod.name, kind: mod.kind, targets: mod.targets || null, readme: mod.readme, readmeProblem: mod.readmeProblem || null, format: mod.format || null });
+}
+export function remember(mod, bytes) {
+  return { ...mod, original: { bytes: bytes || null, key: stateKey(mod), files: mod.files.map((f) => [f.path, f.type, f.mode, f.linkname, f.data]) } };
+}
+export function isUnchanged(mod) {
+  const o = mod.original;
+  if (!o || o.key !== stateKey(mod) || o.files.length !== mod.files.length) return false;
+  return mod.files.every((f, i) => {
+    const g = o.files[i];
+    return g[0] === f.path && g[1] === f.type && g[2] === f.mode && g[3] === f.linkname && g[4] === f.data;
+  });
+}
+
+export const formatLabel = (mod) => (mod.format ? FORMATS[mod.format].label : null);
 
 // files: [{path (relative inside folder, without the folder itself), data}]
 // An unpacked package. Its contents decide mod vs game; a .hmod/.clvg folder name is the tiebreaker.
@@ -223,7 +244,8 @@ export function setKind(mod, kind) {
   return next;
 }
 
-// Sorts a folder's files into packages: packed .hmod/.clvg files, and unpacked
+// Sorts a folder's files into packages: packed .hmod/.clvg files (and .zip/.7z
+// at the top of the folder), and unpacked
 // package folders named *.hmod / *.clvg (the way Hakchi2 CE keeps user_mods).
 // files: [{path relative to the chosen folder, data}]
 export async function modsFromPackageFolder(files) {
@@ -237,7 +259,7 @@ export async function modsFromPackageFolder(files) {
       const key = segs.slice(0, dirIdx + 1).join('/');
       if (!unpacked.has(key)) unpacked.set(key, []);
       unpacked.get(key).push({ path: segs.slice(dirIdx + 1).join('/'), data: f.data });
-    } else if (kindFromFileName(segs[segs.length - 1])) packed.push(f);
+    } else if (kindFromFileName(segs[segs.length - 1]) || (segs.length === 1 && formatFromFileName(segs[0]))) packed.push(f);
     else skipped.push(f.path);
   }
   const mods = [];
@@ -251,7 +273,8 @@ export async function modsFromPackageFolder(files) {
 
 // True when a folder holds packages rather than being one unpacked mod.
 export function looksLikePackageFolder(files) {
-  const hasPackages = files.some((f) => f.path.split('/').some((s) => kindFromFileName(s)));
+  // .zip and .7z only count at the top: a mod can carry archives of its own.
+  const hasPackages = files.some((f) => f.path.split('/').some((s) => kindFromFileName(s)) || (!f.path.includes('/') && formatFromFileName(f.path)));
   if (!hasPackages) return false;
   const found = detectKind(files.filter((f) => !f.path.split('/').some((s) => kindFromFileName(s))).map((f) => ({ path: f.path, type: 'file' })));
   return !found;

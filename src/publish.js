@@ -1,6 +1,6 @@
 // Publish a repository straight to the user's own GitHub Pages site.
 import { buildRepoFiles, INDEX_MARKERS } from './repo.js';
-import { packHmod } from './pack.js';
+import { packPackage } from './pack.js';
 import { textBytes } from './tar.js';
 import { CENTRAL_REPO } from './project.js';
 
@@ -109,7 +109,7 @@ export async function publishToPages(gh, { target, repoSettings, mods, onProgres
 
   onProgress('Packing packages');
   const packed = new Map();
-  for (const m of mods) packed.set(m.id, await packHmod(m));
+  for (const m of mods) if (!m.unavailable) packed.set(m.id, await packPackage(m));
   const all = await buildRepoFiles({ ...repoSettings, baseUrl }, mods, packed);
   const files = all.filter((f) => f.path !== 'HOSTING.md');
   if (cname) files.push({ path: 'CNAME', data: textBytes(cname + '\n') });

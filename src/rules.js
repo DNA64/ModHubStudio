@@ -140,6 +140,12 @@ export function validate(mod) {
   const files = mod.files;
   const paths = files.map((f) => f.path);
 
+  if (mod.unavailable) {
+    add('unavailable', 'info', 'File not downloaded',
+      `${mod.unavailable} The repository keeps listing it exactly as before. Select its file to check or edit it.`);
+    return issues;
+  }
+
   // --- Package-level
   if (mod.source?.nested?.length) {
     const folderOnly = mod.source.nested.every((n) => n.endsWith('/'));
@@ -165,8 +171,22 @@ export function validate(mod) {
       `The file name is the package's permanent ID, written yourname.package (for example ${suggestion}${ext}). ${idProblems.join(' ')} The central repository only takes packages named this way; your own Mod Hub site doesn't require it.`,
       [mod.name + ext], `Rename to ${suggestion}`);
   }
+  if (mod.format) {
+    const label = mod.format === '7z' ? '7z' : 'ZIP';
+    add('format-kept', 'info', `Kept as a ${label} archive`,
+      mod.kind === 'game'
+        ? `Published as the ${label} file it is. Hakchi2 CE opens it when adding the game. Submitting to the central repository packs it as a .clvg (tar.gz) instead.`
+        : `Published as the ${label} file it is, marked so Hakchi2 CE's Mod Hub extracts it into user_mods. hakchi on the console only installs tar.gz, so a module downloaded any other way, or submitted to the central repository, is packed as a .hmod (tar.gz) instead.`);
+    if (mod.kind === 'game' && mod.format === '7z') {
+      add('game-7z', 'warning', 'Mod Hub may not open a 7z game',
+        'Hakchi2 CE saves a game downloaded from the Mod Hub as .clvg and opens it with SharpCompress\'s streaming reader, which reads ZIP and tar but not 7z (AddGamesTask.cs). The same file added by hand works. Use a ZIP for the Mod Hub.');
+    }
+  }
   if (mod.kind === 'game') return validateGame(mod, issues, add);
-  if (mod.source?.kind === 'zip') {
+  if (mod.format) { /* covered above */ } else if (mod.source?.kind === '7z') {
+    add('container-7z', 'info', 'Source was a 7z archive',
+      'hakchi installs hmods with `tar -xzf`, so a 7z named .hmod fails on the console. Packing here writes a proper tar.gz.');
+  } else if (mod.source?.kind === 'zip') {
     add('container-zip', 'info', 'Source was a ZIP archive',
       'hakchi installs hmods with `tar -xzf`, so a ZIP renamed to .hmod fails on the console. Packing here writes a proper tar.gz.');
   } else if (mod.source?.kind === 'tar') {

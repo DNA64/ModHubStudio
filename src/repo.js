@@ -4,7 +4,7 @@
 //   <base>/.repo/list                one "<name>.hmod" per line (used by the console's rlist)
 //   <base>/.repo/<mod>.hmod/link     absolute URL of the .hmod (used by `hmod rinstall`)
 import { buildTar, gzip, textBytes } from './tar.js';
-import { hmodFileName, readmeText } from './pack.js';
+import { hmodFileName, readmeText, serverFileName, keepsOriginal } from './pack.js';
 import { resolveTargets, TARGET_IDS, TARGETS } from './targets.js';
 import { STUDIO_URL } from './project.js';
 
@@ -29,42 +29,140 @@ export function repoIssues(repo, mods) {
     names.set(n, (names.get(n) || 0) + 1);
   }
   for (const [n, c] of names) if (c > 1) out.push({ severity: 'error', text: `${c} mods pack to ${n}. Mod names must be unique within a repository.` });
+  const missing = mods.filter((m) => m.unavailable);
+  if (missing.length) {
+    out.push({ severity: 'info', text: `${missing.length === 1 ? `${hmodFileName(missing[0])} couldn't be downloaded, so it's` : `${missing.length} packages couldn't be downloaded, so they're`} listed exactly as before. Remove ${missing.length === 1 ? 'it if you don\'t want it' : 'any you don\'t want'} listed.` });
+  }
+  if (repo.imported) {
+    for (const m of mods) {
+      const place = packagePlacement(repo, m);
+      if (place.otherHost && !m.unavailable && !keepsOriginal(m)) {
+        out.push({ severity: 'warning', text: `${hmodFileName(m)} changed, and it's downloaded from ${new URL(place.link).host}. Its new file has to be uploaded there by hand; the download keeps it in other-hosts/.` });
+      }
+    }
+  }
   return out;
 }
 
-export function modLink(repo, mod) {
-  if (mod.externalUrl) return mod.externalUrl.trim();
-  return `${normalizeBase(repo.baseUrl)}/${mod.kind === 'game' ? 'games' : 'hmods'}/${encodeURIComponent(hmodFileName(mod))}`;
+// ---------- where each package lives ----------
+
+const encodePath = (p) => p.split('/').map(encodeURIComponent).join('/');
+
+// The path of a link on this site, relative to its address, or null when the
+// link points somewhere else.
+export function sitePath(base, link) {
+  const b = normalizeBase(base);
+  const l = String(link || '').trim();
+  if (!b || !l.toLowerCase().startsWith(b.toLowerCase() + '/')) return null;
+  try { return decodeURIComponent(l.slice(b.length + 1).split(/[?#]/)[0]); } catch { return null; }
 }
 
-async function sha1Hex(u8) {
+const dirOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+
+// The folders an opened repository already keeps packages in, most used first,
+// with how many mods and games each holds.
+export function siteFolders(repo, mods) {
+  if (!repo.imported) return [];
+  const counts = new Map();
+  const base = normalizeBase(repo.baseUrl);
+  for (const p of repo.imported.packages || []) {
+    const path = sitePath(base, p.link);
+    if (path == null) continue;
+    const dir = dirOf(path);
+    const c = counts.get(dir) || { folder: dir, hmod: 0, game: 0 };
+    c[p.kind === 'game' ? 'game' : 'hmod']++;
+    counts.set(dir, c);
+  }
+  for (const m of mods || []) if (m.folder != null && !counts.has(m.folder)) counts.set(m.folder, { folder: m.folder, hmod: 0, game: 0 });
+  return [...counts.values()].sort((a, b) => (b.hmod + b.game) - (a.hmod + a.game) || a.folder.localeCompare(b.folder));
+}
+
+// Where a new package goes in an opened repository unless the author picks
+// another folder: the folder holding most packages of its kind.
+export function defaultFolder(repo, mod) {
+  const folders = siteFolders(repo, []);
+  if (!folders.length) return mod.kind === 'game' ? 'games' : 'hmods';
+  const k = mod.kind === 'game' ? 'game' : 'hmod';
+  return [...folders].sort((a, b) => b[k] - a[k])[0].folder;
+}
+
+// { link, path, otherHost }: the download link, and the path to upload the
+// package's file to (relative to the site), or null when there's nothing to upload.
+export function packagePlacement(repo, mod) {
+  const base = normalizeBase(repo.baseUrl);
+  if (mod.externalUrl) return { link: mod.externalUrl.trim(), path: null };
+  const o = mod.origin;
+  const renamed = o && hmodFileName(mod) !== o.fileName;
+  if (o && !renamed) {
+    // Packages opened from an existing repository keep their link and path.
+    const path = sitePath(base, o.link);
+    return { link: o.link, path, otherHost: path == null };
+  }
+  const file = serverFileName(mod);
+  let folder;
+  if (mod.folder != null) folder = mod.folder;
+  else if (o && sitePath(base, o.link) != null) folder = dirOf(sitePath(base, o.link));
+  else if (repo.imported) folder = defaultFolder(repo, mod);
+  else folder = mod.kind === 'game' ? 'games' : 'hmods';
+  const path = folder ? `${folder}/${file}` : file;
+  return { link: `${base}/${encodePath(path)}`, path };
+}
+
+export function modLink(repo, mod) {
+  return packagePlacement(repo, mod).link;
+}
+
+export async function sha1Hex(u8) {
   const d = await crypto.subtle.digest('SHA-1', u8);
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function md5Hex(u8) {
+export function md5Hex(u8) {
   const SparkMD5 = globalThis.SparkMD5;
   return SparkMD5.ArrayBuffer.hash(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
 }
 
-// packed: Map<modId, Uint8Array> of .hmod bytes.
+// packed: Map<modId, Uint8Array> of package bytes (see packPackage). A package
+// published unchanged from an existing repository needs none.
 // Returns [{path, data}] describing every file to upload, relative to the host root.
 export async function buildRepoFiles(repo, mods, packed) {
   const base = normalizeBase(repo.baseUrl);
+  const imported = !!repo.imported;
   const files = [];
   const meta = [];
   const listLines = [];
+  const uploads = [];
   for (const mod of mods) {
-    const fname = hmodFileName(mod);
-    const bytes = packed.get(mod.id);
-    const link = modLink(repo, mod);
-    const readme = readmeText(mod);
+    const o = mod.origin;
+    // A package that couldn't be downloaded can't be repacked, so it keeps its listing.
+    const fname = mod.unavailable && o ? o.fileName : hmodFileName(mod);
+    const place = packagePlacement(repo, mod);
     listLines.push(fname);
-    meta.push({ path: `${fname}/link`, data: textBytes(link + '\n') });
+    if (o && (mod.unavailable || (keepsOriginal(mod) && fname === o.fileName))) {
+      // Unchanged: everything the repository said about it stays as it was.
+      meta.push({ path: `${fname}/link`, data: textBytes(o.link + '\n') });
+      if (o.md5) meta.push({ path: `${fname}/md5`, data: textBytes(o.md5.trim() + '\n') });
+      if (o.sha1) meta.push({ path: `${fname}/sha1`, data: textBytes(o.sha1.trim() + '\n') });
+      if (o.readme != null) meta.push({ path: `${fname}/${o.readmeName || 'readme.md'}`, data: textBytes(o.readme) });
+      if (o.extract) meta.push({ path: `${fname}/extract`, data: new Uint8Array(0) });
+      continue;
+    }
+    const bytes = packed.get(mod.id);
+    meta.push({ path: `${fname}/link`, data: textBytes(place.link + '\n') });
     meta.push({ path: `${fname}/md5`, data: textBytes(md5Hex(bytes) + '\n') });
     meta.push({ path: `${fname}/sha1`, data: textBytes((await sha1Hex(bytes)) + '\n') });
-    meta.push({ path: `${fname}/readme.md`, data: textBytes(readme) });
-    if (!mod.externalUrl) files.push({ path: `${mod.kind === 'game' ? 'games' : 'hmods'}/${fname}`, data: bytes });
+    meta.push({ path: `${fname}/readme.md`, data: textBytes(readmeText(mod)) });
+    // Hakchi2 CE extracts a module marked this way instead of saving it as is.
+    if (mod.kind === 'hmod' && mod.format) meta.push({ path: `${fname}/extract`, data: new Uint8Array(0) });
+    if (place.path) {
+      files.push({ path: place.path, data: bytes });
+      uploads.push({ path: place.path, mod });
+    } else if (place.otherHost && imported) {
+      const u = new URL(place.link);
+      const path = `other-hosts/${u.host}${decodeURIComponent(u.pathname)}`;
+      files.push({ path, data: bytes });
+      uploads.push({ path, mod, link: place.link });
+    }
   }
   // No packages: an empty list, not a blank line `hmod rlist` would print.
   const list = textBytes(listLines.length ? listLines.join('\n') + '\n' : '');
@@ -82,10 +180,65 @@ export async function buildRepoFiles(repo, mods, packed) {
   files.push({ path: '.repo/list', data: list });
   files.push({ path: '.repo/readme.md', data: repoReadme });
   for (const m of meta) files.push({ path: `.repo/${m.path}`, data: m.data });
+  if (imported) {
+    // An existing site keeps its own pages; only what changed is in the download.
+    files.push({ path: 'UPLOAD.md', data: textBytes(uploadGuide(repo, mods, uploads)) });
+    return files;
+  }
   files.push({ path: '.nojekyll', data: new Uint8Array(0) });
   files.push({ path: 'index.html', data: textBytes(indexHtml(repo, mods, base)) });
   files.push({ path: 'HOSTING.md', data: textBytes(hostingGuide(base)) });
   return files;
+}
+
+// Files on an opened site that nothing points to any more: packages removed
+// from the list, and old files of packages that were renamed or moved.
+export function staleFiles(repo, mods) {
+  if (!repo.imported) return [];
+  const base = normalizeBase(repo.baseUrl);
+  const kept = new Set();
+  for (const m of mods) {
+    const p = packagePlacement(repo, m).path;
+    if (p) kept.add(p);
+  }
+  const out = [];
+  for (const p of repo.imported.packages || []) {
+    const path = sitePath(base, p.link);
+    if (path != null && !kept.has(path)) out.push(path);
+  }
+  return [...new Set(out)];
+}
+
+function uploadGuide(repo, mods, uploads) {
+  const base = normalizeBase(repo.baseUrl);
+  const onSite = uploads.filter((u) => !u.link);
+  const elsewhere = uploads.filter((u) => u.link);
+  const listed = new Set(mods.map((m) => hmodFileName(m)));
+  const removed = (repo.imported.packages || []).filter((p) => !listed.has(p.fileName));
+  const stale = staleFiles(repo, mods);
+  const lines = [
+    '# Updating this repository',
+    '',
+    `This download holds only what changed on ${base || 'the site'}. Upload it over the site, keeping the folders as they are. Nothing else on the site needs to change.`,
+    '',
+    '## Upload',
+    '',
+    '- the whole `.repo` folder (it is hidden on some computers)',
+    ...onSite.map((u) => `- \`${u.path}\` (${hmodFileName(u.mod)})`),
+    '',
+  ];
+  if (elsewhere.length) {
+    lines.push('## Upload to other hosts', '', 'These packages are downloaded from another site. Their new files are in `other-hosts/`; put each one at its link:', '');
+    for (const u of elsewhere) lines.push(`- \`${u.path}\` → ${u.link}`);
+    lines.push('');
+  }
+  if (stale.length || removed.length) {
+    lines.push('## Can be deleted', '', 'Nothing links to these any more. Deleting them is optional:', '');
+    for (const p of stale) lines.push(`- \`${p}\``);
+    for (const p of removed) lines.push(`- \`.repo/${p.fileName}/\` (if the site has it)`);
+    lines.push('');
+  }
+  return lines.join('\n');
 }
 
 export async function buildRepoZip(repo, mods, packed) {

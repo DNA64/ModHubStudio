@@ -1,8 +1,11 @@
-import { modFromArchive, modFromFolder, modsFromPackageFolder, looksLikePackageFolder, setKind, renameFile, totalSize, KINDS, ACCEPTED_EXTENSIONS } from './model.js';
+import { modFromArchive, modFromFolder, modsFromPackageFolder, looksLikePackageFolder, setKind, renameFile, totalSize, KINDS, ACCEPTED_EXTENSIONS, isUnchanged, formatLabel } from './model.js';
 import { TARGETS, TARGET_IDS, resolveTargets, detectTargets } from './targets.js';
 import { validate, applyFix, applyAllFixes, AUTO_FIX_IDS, destination, fileMode, cleanName, OVERLAY_ROOTS, CONTROL_FILES } from './rules.js';
-import { packHmod, hmodFileName, readmeText } from './pack.js';
-import { buildRepoFiles, buildRepoZip, repoIssues, modLink, normalizeBase } from './repo.js';
+import { packPackage, hmodFileName, readmeText, serverFileName, keepsOriginal } from './pack.js';
+import { buildRepoFiles, buildRepoZip, repoIssues, modLink, normalizeBase, packagePlacement, siteFolders, defaultFolder, staleFiles } from './repo.js';
+import { importRepository, readRepositoryIndex, siteFromFiles, siteFromAddress, guessBase, attachFile } from './import.js';
+import { readZip } from './archive.js';
+import { isZip } from './tar.js';
 import { CATEGORIES, STANDARD_FIELDS, MANAGED_FIELDS } from './readme.js';
 import { exampleMods } from './examples.js';
 import { createClient, parseRepoName } from './github.js';
@@ -470,8 +473,8 @@ function PackageTab({ mod, issues, notify, goPublish }) {
   const pack = async () => {
     setBusy(true);
     try {
-      const bytes = await packHmod(mod);
-      const name = hmodFileName(mod);
+      const bytes = await packPackage(mod);
+      const name = serverFileName(mod);
       offerFile(name, bytes);
       notify(`Saved ${name}.`);
     } catch (e) {
@@ -481,8 +484,11 @@ function PackageTab({ mod, issues, notify, goPublish }) {
   return (
     <div className="stack">
       <dl className="facts">
-        <div><dt>File</dt><dd><code>{hmodFileName(mod)}</code></dd></div>
-        {mod.kind === 'game' ? <>
+        <div><dt>File</dt><dd><code>{serverFileName(mod)}</code>{mod.format && <> · listed as <code>{hmodFileName(mod)}</code></>}</dd></div>
+        {mod.format ? <>
+          <div><dt>Format</dt><dd>{formatLabel(mod)} archive, kept in its own format{keepsOriginal(mod) ? '. Unchanged, so the original file is used as it is' : ''}</dd></div>
+          <div><dt>Contents</dt><dd>{mod.files.length} files, {fmtSize(totalSize(mod))} before compression</dd></div>
+        </> : mod.kind === 'game' ? <>
           <div><dt>Format</dt><dd>gzip-compressed tar, the same layout Hakchi2 CE's own game export writes</dd></div>
           <div><dt>Contents</dt><dd>{mod.files.length} files, {fmtSize(totalSize(mod))} before compression</dd></div>
         </> : <>
@@ -493,7 +499,7 @@ function PackageTab({ mod, issues, notify, goPublish }) {
       </dl>
       {errors > 0 && <p className="callout callout-error">There {errors === 1 ? 'is 1 error' : `are ${errors} errors`} in Checks. You can still pack, but the mod won't install correctly until they're fixed.</p>}
       <div className="row">
-        <button className="btn btn-primary" disabled={busy} onClick={pack}>{busy ? 'Packing…' : `Download ${hmodFileName(mod)}`}</button>
+        <button className="btn btn-primary" disabled={busy} onClick={pack}>{busy ? 'Packing…' : `Download ${serverFileName(mod)}`}</button>
       </div>
       <p className="muted small">To put it on your Mod Hub site or send it to a central repository, use the <button className="linkish small" onClick={goPublish}>Publish tab</button>.</p>
     </div>
@@ -529,6 +535,47 @@ function ConsolePicker({ mod, update }) {
   );
 }
 
+// A package listed in an opened repository whose file couldn't be downloaded.
+function MissingFile({ mod, update, notify }) {
+  const input = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const pick = async (file) => {
+    setBusy(true); setError(null);
+    try {
+      const r = await attachFile(mod, new Uint8Array(await file.arrayBuffer()));
+      update(r.mod);
+      notify([`Opened ${file.name} for ${hmodFileName(mod)}.`, ...r.problems.map((p) => p.text)].join(' '), r.problems.length > 0);
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="stack">
+      <p className="callout callout-warning">{mod.unavailable}</p>
+      <p>The repository keeps listing it exactly as before: same link, hashes and readme. To check or edit it, download its file yourself and select it here.</p>
+      <p className="muted small mono">{mod.origin.link}</p>
+      <div className="row">
+        <button className="btn btn-primary" disabled={busy} onClick={() => input.current.click()}>{busy ? 'Reading…' : 'Select its file'}</button>
+        <a className="btn" href={mod.origin.link} target="_blank" rel="noopener noreferrer">Open the link</a>
+      </div>
+      <input ref={input} type="file" hidden onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; if (f) pick(f); }} />
+      {error && <p className="callout callout-error">{error}</p>}
+    </div>
+  );
+}
+
+function OriginNote({ mod }) {
+  if (!mod.origin) return null;
+  const same = hmodFileName(mod) === mod.origin.fileName;
+  return (
+    <p className="muted small">
+      <span className={`pill ${mod.unavailable ? 'pill-warning' : keepsOriginal(mod) && same ? 'pill-ok' : 'pill-example'}`}>
+        {mod.unavailable ? 'Not downloaded' : keepsOriginal(mod) && same ? 'Unchanged' : 'Changed'}
+      </span>{' '}
+      {mod.unavailable ? 'Listed as before.' : keepsOriginal(mod) && same ? 'Published exactly as it is now.' : same ? 'Publishing uploads a new file to the same link, with new hashes.' : `Renamed from ${mod.origin.fileName}: publishing lists it under the new name.`}
+    </p>
+  );
+}
+
 function ModView({ mod, update, remove, notify, goPublish }) {
   const [tab, setTab] = useState('checks');
   const issues = useMemo(() => validate(mod), [mod]);
@@ -546,13 +593,14 @@ function ModView({ mod, update, remove, notify, goPublish }) {
         <div className="name-edit">
           <label htmlFor={`name-${mod.id}`} className="eyebrow">Package ID</label>
           <div className="name-row">
-            <input id={`name-${mod.id}`} className={`name-input ${nameIssue ? 'has-issue' : ''}`} value={mod.name}
+            <input id={`name-${mod.id}`} className={`name-input ${nameIssue ? 'has-issue' : ''}`} value={mod.name} disabled={!!mod.unavailable}
               size={Math.max(6, mod.name.length + 1)} onChange={(e) => update({ ...mod, name: e.target.value })} spellCheck="false"
               title="Click to rename the packed file" />
             <span className="ext">{KINDS[mod.kind].ext}</span>
-            <button className="btn btn-small btn-quiet rename-btn" onClick={() => { const el = document.getElementById(`name-${mod.id}`); el.focus(); el.select(); }}>Rename</button>
+            {mod.format && <span className="pill">{formatLabel(mod)}</span>}
+            {!mod.unavailable && <button className="btn btn-small btn-quiet rename-btn" onClick={() => { const el = document.getElementById(`name-${mod.id}`); el.focus(); el.select(); }}>Rename</button>}
           </div>
-          {!idOk && (
+          {!idOk && !mod.unavailable && (
             <p className="muted small">
               Not a Package ID yet (yourname.package, lowercase, no underscores). The central repository requires one.{' '}
               <button className="linkish" onClick={() => update({ ...mod, name: suggestPackageId(mod) })}>Use {suggestPackageId(mod)}</button>
@@ -560,21 +608,23 @@ function ModView({ mod, update, remove, notify, goPublish }) {
           )}
           <p className="muted small">
             {mod.source?.example ? <span className="pill pill-example">Example</span> : null}{' '}
-            From {mod.source?.fileName} · {mod.files.length} files · {fmtSize(totalSize(mod))}
+            {mod.origin ? `From ${mod.origin.link}` : `From ${mod.source?.fileName}`}{!mod.unavailable && ` · ${mod.files.length} files · ${fmtSize(totalSize(mod))}`}
           </p>
-          <div className="kind-row">
+          <OriginNote mod={mod} />
+          {!mod.unavailable && <><div className="kind-row">
             <div className="segmented" role="radiogroup" aria-label="Package type">
               {Object.entries(KINDS).map(([k, v]) => (
                 <button key={k} role="radio" aria-checked={mod.kind === k} className={mod.kind === k ? 'on' : ''}
                   onClick={() => update(setKind(mod, k))}>{v.label} <span className="mono">{v.ext}</span></button>
               ))}
             </div>
-            <span className="muted small">{{ contents: 'Detected from its contents', name: 'From the file name (contents were unclear)', default: 'Defaulted to mod (contents were unclear)', manual: 'Set by you' }[mod.source?.kindFrom || 'name']}</span>
+            <span className="muted small">{{ contents: 'Detected from its contents', name: 'From the file name (contents were unclear)', default: 'Defaulted to mod (contents were unclear)', manual: 'Set by you', repository: 'From the repository\'s listing' }[mod.source?.kindFrom || 'name']}</span>
           </div>
-          <ConsolePicker mod={mod} update={update} />
+          <ConsolePicker mod={mod} update={update} /></>}
         </div>
         <button className="btn btn-quiet" onClick={remove}>Remove from repository</button>
       </header>
+      {mod.unavailable ? <div className="pane-body"><MissingFile mod={mod} update={update} notify={notify} /></div> : <>
       <nav className="tabs" role="tablist">
         {tabs.map(([id, label, extra]) => (
           <button key={id} role="tab" aria-selected={tab === id} className={`tab ${tab === id ? 'on' : ''}`} onClick={() => setTab(id)}>
@@ -587,6 +637,105 @@ function ModView({ mod, update, remove, notify, goPublish }) {
         {tab === 'files' && <FilesTab mod={mod} update={update} />}
         {tab === 'readme' && <ReadmeTab mod={mod} update={update} />}
         {tab === 'package' && <PackageTab mod={mod} issues={issues} notify={notify} goPublish={goPublish} />}
+      </div></>}
+    </section>
+  );
+}
+
+// ---------- opening an existing repository ----------
+function ImportPane({ repo, hasPackages, onImported, onClose }) {
+  const [address, setAddress] = useState(repo.imported ? repo.baseUrl : '');
+  const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState([]);
+  const [error, setError] = useState(null);
+  const [report, setReport] = useState(null);
+  const folderInput = useRef(null);
+  const zipInput = useRef(null);
+  const progress = (t) => setSteps((s) => [...s.slice(-4), t]);
+
+  const run = async (work) => {
+    setBusy(true); setError(null); setReport(null); setSteps([]);
+    try {
+      const r = await work();
+      onImported(r);
+      setReport(r);
+    } catch (e) { setError(e.message || 'The repository could not be opened.'); } finally { setBusy(false); }
+  };
+
+  const byAddress = () => run(async () => {
+    const base = normalizeBase(address);
+    if (!/^https?:\/\/[^/\s]+/i.test(base)) throw new Error('Enter the site address, starting with https://.');
+    const site = siteFromAddress(base);
+    return importRepository({ base, readFile: site.readFile, download: site.download, onProgress: progress });
+  });
+
+  // files: [{path, data}] where data is a File or bytes.
+  const fromCopy = (files) => run(async () => {
+    const site = siteFromFiles(files, address);
+    const index = await readRepositoryIndex(site.readFile);
+    const base = normalizeBase(address) || guessBase(index.items.map((i) => i.link), site.match);
+    if (!base) throw new Error('The links in this repository don\'t point to files in the copy, so its address can\'t be worked out. Enter the site address above and open it again.');
+    if (!address) setAddress(base);
+    site.setBase(base);
+    // Packages that aren't in the copy are fetched from their links where the host allows it.
+    const live = siteFromAddress(base);
+    return importRepository({ base, readFile: site.readFile, localFile: site.localFile, download: live.download, onProgress: progress });
+  });
+
+  const pickFolder = (fileList) => fromCopy([...fileList].map((f) => ({ path: f.webkitRelativePath || f.name, data: f })));
+  const pickZip = async (file) => {
+    const u8 = new Uint8Array(await file.arrayBuffer());
+    if (!isZip(u8)) { setError(`${file.name} isn't a ZIP file.`); return; }
+    const entries = await readZip(u8);
+    fromCopy(entries.filter((e) => e.type === 'file').map((e) => ({ path: e.path, data: e.data })));
+  };
+
+  const problems = report ? report.problems : [];
+  return (
+    <section className="pane">
+      <header className="pane-head">
+        <div>
+          <span className="eyebrow">Open an existing repository</span>
+          <h2>Manage a Mod Hub site you already run</h2>
+          <p className="muted small">Its packages are loaded here with their links, hashes and readmes. Publishing again keeps unchanged packages exactly where they are, uploads changed ones to the same links, and puts new ones in a folder the site already has.</p>
+        </div>
+        <button className="btn btn-quiet" onClick={onClose}>{report ? 'Done' : 'Cancel'}</button>
+      </header>
+      <div className="pane-body stack-lg">
+        {hasPackages && !report && <p className="callout callout-warning">Opening a repository replaces the packages loaded now.</p>}
+        <div className="stack panel">
+          <h3>By address</h3>
+          <label className="field"><span>Site address</span>
+            <input id="import-url" value={address} placeholder="https://mods.example.com" spellCheck="false" disabled={busy}
+              onChange={(e) => setAddress(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !busy) byAddress(); }} />
+            <small className="muted">The address users add in Hakchi2 CE, the folder that holds <code>.repo</code>.</small>
+          </label>
+          <div className="row">
+            <button className="btn btn-primary" disabled={busy || !address.trim()} onClick={byAddress}>{busy ? 'Opening…' : 'Open'}</button>
+          </div>
+          <p className="muted small">A page can only read another site's files when that site allows it with an <code>Access-Control-Allow-Origin</code> header. Most hosts don't send one; if the site is one of them, open a copy of it instead.</p>
+        </div>
+        <div className="stack panel">
+          <h3>From a copy of the site</h3>
+          <p className="muted small">A folder or ZIP holding the site's <code>.repo</code> folder, and the package files where they sit on the site (for example <code>nimbus/Mods/…</code>). Packages that aren't in the copy are downloaded from their links if the host allows it, or listed as before. Just the <code>.repo</code> folder works too.</p>
+          <div className="row">
+            <button className="btn" disabled={busy} onClick={() => folderInput.current.click()}>Select the site folder</button>
+            <button className="btn" disabled={busy} onClick={() => zipInput.current.click()}>Select a ZIP of it</button>
+          </div>
+          <input ref={folderInput} type="file" hidden webkitdirectory="" directory=""
+            onChange={(e) => { const fl = [...e.target.files]; e.target.value = ''; if (fl.length) pickFolder(fl); }} />
+          <input ref={zipInput} type="file" hidden accept=".zip"
+            onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; if (f) pickZip(f); }} />
+        </div>
+        {busy && steps.length > 0 && <ol className="steps" role="status">{steps.map((t, i) => <li key={i}>{t}</li>)}</ol>}
+        {error && <p className="callout callout-error">{error}</p>}
+        {report && (
+          <div className="stack">
+            <p className="callout callout-ok"><strong>Opened {report.repo.baseUrl}.</strong> {report.summary}</p>
+            {problems.length > 0 && <ul className="plain-issues">{problems.map((p, i) => <li key={i} className={`callout callout-${p.severity}`}>{p.text}</li>)}</ul>}
+            <p className="muted small">Check and edit packages on the left. When you're done, use <b>Download update</b> on the Publish tab and upload it over the site.</p>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -678,9 +827,34 @@ function useRepoBasics(repo, mods) {
 
 const consolesLabel = (m) => { const t = resolveTargets(m).ids; return t.length === TARGET_IDS.length ? 'All' : t.map((x) => TARGETS[x].label).join(', '); };
 
-function RepoView({ repo, setRepo, mods, updateMod, open, goPublish }) {
+function LinkCell({ repo, effective, base, mod: m, updateMod, folders }) {
+  const place = packagePlacement(effective, m);
+  if (m.origin && hmodFileName(m) === m.origin.fileName) {
+    return <span className="mono small" title="Kept from the repository">{place.link}</span>;
+  }
+  if (repo.imported) {
+    const value = m.folder != null ? m.folder : defaultFolder(effective, m);
+    return (
+      <div className="stack">
+        <select aria-label={`Folder for ${hmodFileName(m)}`} value={value} onChange={(e) => updateMod({ ...m, folder: e.target.value })}>
+          {folders.map((f) => <option key={f.folder} value={f.folder}>{f.folder || '(site root)'}</option>)}
+        </select>
+        <span className="mono small muted">{place.link}</span>
+      </div>
+    );
+  }
+  return (
+    <input id={`ext-${m.id}`} className="mono small" value={m.externalUrl || ''}
+      placeholder={base ? modLink(effective, { ...m, externalUrl: '' }) : 'hosted with the repository'}
+      onChange={(e) => updateMod({ ...m, externalUrl: e.target.value })} />
+  );
+}
+
+function RepoView({ repo, setRepo, mods, updateMod, open, goPublish, closeImported }) {
   const [tree, setTree] = useState(null);
   const { base, effective, modIssues, hosting } = useRepoBasics(repo, mods);
+  const folders = useMemo(() => siteFolders(effective, mods), [effective, mods]);
+  const stale = useMemo(() => staleFiles(effective, mods), [effective, mods]);
 
   useEffect(() => {
     let alive = true;
@@ -703,6 +877,7 @@ function RepoView({ repo, setRepo, mods, updateMod, open, goPublish }) {
           <span className="eyebrow">Repository</span>
           <h2>{repo.title || 'Untitled repository'}</h2>
           <p className="muted small">{base ? <>Hakchi2 CE users add <code>{base}</code> under Modules → Mod Hub → Repositories.</> : <>No site address yet. Choose where it's hosted on the <button className="linkish small" onClick={goPublish}>Publish tab</button>.</>}</p>
+          {repo.imported && <p className="muted small">Opened from the site. Unchanged packages keep their files and links; changed ones go back to the same links; new ones go into a folder the site already has. <button className="linkish small" onClick={closeImported}>Close this repository</button></p>}
         </div>
       </header>
       <div className="pane-body stack-lg">
@@ -714,7 +889,7 @@ function RepoView({ repo, setRepo, mods, updateMod, open, goPublish }) {
               <textarea id="repo-readme" rows={4} value={repo.readme} onChange={(e) => setRepo({ ...repo, readme: e.target.value })} /></label>
           </div>
           <div className="stack">
-            <span className="eyebrow">Files in the published site</span>
+            <span className="eyebrow">{repo.imported ? 'Files to upload' : 'Files in the published site'}</span>
             <pre className="code tree">{tree ? tree.join('\n') : 'Building…'}</pre>
           </div>
         </div>
@@ -732,18 +907,22 @@ function RepoView({ repo, setRepo, mods, updateMod, open, goPublish }) {
                       <td>{m.readme.front.Version || <span className="muted">—</span>}</td>
                       <td className="small">{consolesLabel(m)}</td>
                       <td><Counts issues={modIssues[i]} compact /></td>
-                      <td className="link-cell">
-                        <input id={`ext-${m.id}`} className="mono small" value={m.externalUrl || ''}
-                          placeholder={base ? modLink(effective, { ...m, externalUrl: '' }) : 'hosted with the repository'}
-                          onChange={(e) => updateMod({ ...m, externalUrl: e.target.value })} />
-                      </td>
+                      <td className="link-cell"><LinkCell repo={repo} effective={effective} base={base} mod={m} updateMod={updateMod} folders={folders} /></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ) : <p className="muted">No packages yet. Add them on the Packages tab.</p>}
-          <p className="muted small">Leave a download link empty to host the package with the repository, or paste a URL such as a GitHub release asset. Use a release asset for anything over 100 MB, which GitHub won't store in a repository.</p>
+          {repo.imported
+            ? <p className="muted small">Packages from the site keep their links. For each new package, pick the folder of the site it goes in.</p>
+            : <p className="muted small">Leave a download link empty to host the package with the repository, or paste a URL such as a GitHub release asset. Use a release asset for anything over 100 MB, which GitHub won't store in a repository.</p>}
+          {stale.length > 0 && (
+            <div className="stack">
+              <span className="eyebrow">Nothing links to these any more (deleting them is optional)</span>
+              <pre className="code tree">{stale.join('\n')}</pre>
+            </div>
+          )}
         </div>
       </div>
     </section>
@@ -760,11 +939,11 @@ function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
     setBusy(true);
     try {
       const packed = new Map();
-      for (const m of mods) packed.set(m.id, await packHmod(m));
+      for (const m of mods) if (!m.unavailable) packed.set(m.id, await packPackage(m));
       const zip = await buildRepoZip(effective, mods, packed);
-      const name = `${cleanName(repo.title || 'hmod-repo').toLowerCase()}-site.zip`;
+      const name = `${cleanName(repo.title || 'hmod-repo').toLowerCase()}-${repo.imported ? 'update' : 'site'}.zip`;
       offerFile(name, zip);
-      notify(`Saved ${name}. Upload its contents to ${base || 'your host'}.`);
+      notify(repo.imported ? `Saved ${name}. Upload its contents over ${base}; UPLOAD.md inside lists them.` : `Saved ${name}. Upload its contents to ${base || 'your host'}.`);
     } catch (e) {
       notify((e && e.message) || 'The download could not start.', true);
     } finally { setBusy(false); }
@@ -793,6 +972,7 @@ function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
             <div className="segmented" role="radiogroup" aria-label="Where the repository is hosted">
               {[['pages', 'GitHub Pages'], ['own', 'My own web host']].map(([k, label]) => (
                 <button key={k} role="radio" aria-checked={hosting === k} className={hosting === k ? 'on' : ''}
+                  disabled={!!repo.imported && k === 'pages'} title={repo.imported && k === 'pages' ? 'An opened repository is updated where it is hosted' : undefined}
                   onClick={() => setRepo({ ...repo, hosting: k })}>{label}</button>
               ))}
             </div>
@@ -816,8 +996,10 @@ function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
                 <small className="muted">The exact address the files will live at. Users add it in Hakchi2 CE under Modules → Mod Hub → Repositories.</small>
               </label>
               <div className="row">
-                <button className="btn btn-primary" disabled={busy || blocking.length > 0} onClick={exportRepo}>{busy ? 'Building…' : 'Download repository'}</button>
-                <span className="muted small">Unzip it and upload everything, including the hidden <code>.repo</code> folder, to that address. <code>HOSTING.md</code> inside has the details.</span>
+                <button className="btn btn-primary" disabled={busy || blocking.length > 0} onClick={exportRepo}>{busy ? 'Building…' : repo.imported ? 'Download update' : 'Download repository'}</button>
+                {repo.imported
+                  ? <span className="muted small">It holds the new <code>.repo</code> and only the packages that changed or are new, in the site's own folders. Upload it over the site; <code>UPLOAD.md</code> inside lists what to upload and what can be deleted.</span>
+                  : <span className="muted small">Unzip it and upload everything, including the hidden <code>.repo</code> folder, to that address. <code>HOSTING.md</code> inside has the details.</span>}
               </div>
             </div>
           )}
@@ -835,9 +1017,9 @@ function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
           {(!github.login || !central) && <p className="muted small">{!github.login ? 'Connect your GitHub account above' : 'Enter the central repository'} to check and submit packages.</p>}
           {mods.length ? (
             <ul className="submit-list">
-              {mods.map((m, i) => (
+              {mods.map((m, i) => (m.unavailable ? null : (
                 <SubmitItem key={m.id} mod={m} issues={modIssues[i]} central={central} github={github} notify={notify} open={() => open(m.id)} />
-              ))}
+              )))}
             </ul>
           ) : <p className="muted">No packages yet. Add them on the Packages tab.</p>}
         </div>
@@ -847,6 +1029,21 @@ function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
 }
 
 // ---------- app ----------
+function savedRepo() {
+  const loaded = {
+    title: 'My hmod repository',
+    baseUrl: '',
+    readme: 'Themes and tweaks for the SNES Classic.',
+    hosting: 'pages',
+    pages: { repo: '', branch: 'main', cname: '' },
+    ...load('hmodpub.repo', {}),
+    ...load('mhs.repo', {}),
+  };
+  delete loaded.imported;
+  // The MMC central repository is the default place to submit to.
+  if (!loaded.central) loaded.central = CENTRAL_REPO;
+  return loaded;
+}
 const VIEWS = ['packages', 'repository', 'publish'];
 const allIssuesList = (mods) => mods.map((m) => validate(m));
 
@@ -863,21 +1060,8 @@ export function App() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
-  const open = (id) => { setSelected(id); setView('packages'); };
-  const [repo, setRepoState] = useState(() => {
-    const loaded = {
-    title: 'My hmod repository',
-    baseUrl: '',
-    readme: 'Themes and tweaks for the SNES Classic.',
-    hosting: 'pages',
-    pages: { repo: '', branch: 'main', cname: '' },
-    ...load('hmodpub.repo', {}),
-    ...load('mhs.repo', {}),
-    };
-    // The MMC central repository is the default place to submit to.
-    if (!loaded.central) loaded.central = CENTRAL_REPO;
-    return loaded;
-  });
+  const open = (id) => { setSelected(id); setImporting(false); setView('packages'); };
+  const [repo, setRepoState] = useState(savedRepo);
 
   // The token is kept only for this tab unless the person ticks Remember.
   const [github, setGithubState] = useState(() => load('mhs.github', load('hmodpub.github', { token: '', login: '', remember: false })));
@@ -894,7 +1078,22 @@ export function App() {
   const folderInput = useRef(null);
   const packagesInput = useRef(null);
 
-  const setRepo = (r) => { setRepoState(r); save('mhs.repo', r); };
+  // An opened repository's settings aren't saved, so the person's own
+  // repository is still there next time.
+  const setRepo = (r) => { setRepoState(r); if (!r.imported) save('mhs.repo', r); };
+  const [importing, setImporting] = useState(false);
+  const onImported = (r) => {
+    setMods(r.mods);
+    setSelected(null);
+    setRepoState((prev) => ({ ...prev, ...r.repo, hosting: 'own' }));
+  };
+  const closeImported = () => {
+    setRepoState(savedRepo());
+    setMods([]);
+    setSelected(null);
+    setImporting(false);
+    notify('Closed the opened repository.');
+  };
   const notify = useCallback((text, error = false, action = null) => {
     setToast({ text, error, action, at: Date.now() });
   }, []);
@@ -932,6 +1131,7 @@ export function App() {
         if (mods.length && hasExamplesOnlyFirst(mods)) added.notes = [...(added.notes || []), 'The examples were cleared.'];
         setMods((ms) => [...ms.filter((m) => !m.source?.example || !hasExamplesOnlyFirst(ms)), ...added]);
         setSelected(added[0].id);
+        setImporting(false);
         setView('packages');
       }
       const notes = () => added.notes || [];
@@ -985,9 +1185,9 @@ export function App() {
             <ul className="rail-list">
               {mods.map((m) => (
                 <li key={m.id}>
-                  <button className={`rail-item ${current && current.id === m.id ? 'on' : ''}`} onClick={() => setSelected(m.id)}>
+                  <button className={`rail-item ${!importing && current && current.id === m.id ? 'on' : ''}`} onClick={() => { setSelected(m.id); setImporting(false); }}>
                     <span className="rail-title">{m.readme.front.Name || m.name}{m.source?.example && <span className="pill pill-example">Example</span>}</span>
-                    <span className="rail-meta"><span className="mono small muted">{hmodFileName(m)}</span><Counts issues={allIssues.get(m.id) || []} compact /></span>
+                    <span className="rail-meta"><span className="mono small muted">{hmodFileName(m)}</span>{m.unavailable ? <span className="pill pill-warning">Not downloaded</span> : <Counts issues={allIssues.get(m.id) || []} compact />}</span>
                   </button>
                 </li>
               ))}
@@ -996,11 +1196,13 @@ export function App() {
               <p><strong>{loading ? 'Reading…' : 'Add packages'}</strong><br /><span className="muted small">Drop files or folders here, or:</span></p>
               <div className="pickers">
                 <button className="btn btn-small" onClick={() => fileInput.current.click()}>Select a module</button>
-                <span className="muted small">A .hmod module or .clvg game file</span>
+                <span className="muted small">A .hmod module or .clvg game file, or a .zip or .7z one</span>
                 <button className="btn btn-small" onClick={() => folderInput.current.click()}>Select an unpacked module</button>
                 <span className="muted small">The folder you're building a module in</span>
                 <button className="btn btn-small" onClick={() => packagesInput.current.click()}>Select multiple packages</button>
                 <span className="muted small">A folder of .hmod and .clvg files, like Hakchi2 CE's user_mods</span>
+                <button className="btn btn-small" onClick={() => { setImporting(true); setView('packages'); }}>Open an existing repository</button>
+                <span className="muted small">A Mod Hub site you already run, to manage its packages here</span>
               </div>
               <input ref={fileInput} id="pick-files" type="file" multiple hidden accept={ACCEPTED_EXTENSIONS.join(",")}
                 onChange={(e) => { const fl = [...e.target.files]; e.target.value = ''; addMods(() => modsFromFiles(fl)); }} />
@@ -1012,13 +1214,15 @@ export function App() {
             <p className="muted small rail-foot">Files stay in this browser until you publish.</p>
           </aside>
           <main className="main">
-            {current
+            {importing
+              ? <ImportPane repo={repo} hasPackages={mods.some((m) => !m.source?.example)} onImported={onImported} onClose={() => setImporting(false)} />
+              : current
               ? <ModView key={current.id} mod={current} update={updateMod} remove={() => removeMod(current.id)} notify={notify} goPublish={() => setView('publish')} />
               : (
                 <section className="pane">
                   <div className="empty-start">
                     <h2>No packages yet</h2>
-                    <p className="muted">Add a module, an unpacked module folder, or a folder of packages from the panel on the left. Each one is checked against hakchi's install rules as soon as it's added.</p>
+                    <p className="muted">Add a module, an unpacked module folder, or a folder of packages from the panel on the left, or open a Mod Hub site you already run. Each package is checked against hakchi's install rules as soon as it's added.</p>
                   </div>
                 </section>
               )}
@@ -1027,7 +1231,7 @@ export function App() {
       ) : (
         <div className="single">
           {view === 'repository'
-            ? <RepoView repo={repo} setRepo={setRepo} mods={mods} updateMod={updateMod} open={open} goPublish={() => setView('publish')} />
+            ? <RepoView repo={repo} setRepo={setRepo} mods={mods} updateMod={updateMod} open={open} goPublish={() => setView('publish')} closeImported={closeImported} />
             : <PublishView repo={repo} setRepo={setRepo} mods={mods} notify={notify} github={github} setGithub={setGithub} open={open} />}
         </div>
       )}

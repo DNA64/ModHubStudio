@@ -20,15 +20,46 @@ Download `dist/index.html` and open it in a browser, or host it anywhere as a st
 | Repository | The repository's name and description, the package list with versions, consoles and download links, and the files the site will contain |
 | Publish | Your GitHub account, publishing your own Mod Hub site, and submitting packages to a central repository |
 
-There are three ways to add packages on the Packages tab:
+There are four ways to add packages on the Packages tab:
 
 | Button | What to pick |
 |---|---|
-| Select a module | A `.hmod` module or `.clvg` game file (or several), the two package types Hakchi2 CE's Mod Hub knows |
+| Select a module | A `.hmod` module or `.clvg` game file (or several), the two package types Hakchi2 CE's Mod Hub knows, or a `.zip` / `.7z` one |
 | Select an unpacked module | One folder you're building a module in (`readme.md`, `install`, `etc/`, `usr/`…). It's checked and packed into a `.hmod` |
 | Select multiple packages | A folder holding `.hmod` / `.clvg` files and unpacked `*.hmod` / `*.clvg` folders, the way Hakchi2 CE keeps `user_mods`. Each becomes its own package; other files are ignored |
 
-Dragging a folder onto the page works out which of the last two it is.
+| Open an existing repository | A Mod Hub site you already run, to manage its packages here (see below) |
+
+Dragging a folder onto the page works out which of the middle two it is.
+
+### ZIP and 7z packages
+
+Hakchi2 CE installs ZIP and 7z packages too: its Mod Hub extracts a module whose repository entry has an `extract` file, and its game import opens `.zip` and `.7z` archives. A `.zip` or `.7z` file added here is checked like any other package and stays in its format:
+
+- Unchanged, it's published as the exact file it is. Changed, it's repacked in the same format.
+- The repository lists it as `.hmod` or `.clvg` (that's how Hakchi2 CE tells mods from games) and its link points to the `.zip` / `.7z` file. Modules get the `extract` flag.
+- Submitting it to a central repository packs it as tar.gz, as before.
+- A 7z game is flagged: Hakchi2 CE opens a game downloaded from the Mod Hub with SharpCompress's streaming reader, which has no 7z support, so a ZIP is the safer choice there.
+
+A ZIP or 7z renamed to `.hmod` is still repacked as tar.gz, since hakchi installs `.hmod` files with `tar -xzf`. 7z support is 7-Zip compiled to WebAssembly ([7z-wasm](https://github.com/use-strict/7z-wasm), LGPL), loaded from jsDelivr the first time a 7z is opened.
+
+### Open an existing repository
+
+**Open an existing repository** loads a Mod Hub site that already exists on any web host, so it can be managed here. It reads the repository the way Hakchi2 CE does: `.repo/pack.tgz`, or the same files loose in `.repo/` when there's no pack. Duplicate list entries, entries Hakchi2 CE wouldn't show, and files whose md5 or sha1 don't match are reported.
+
+- **By address.** Enter the site address and click **Open**. This only works when the site sends an `Access-Control-Allow-Origin` header; browsers don't let a page read other sites' files otherwise, and most hosts don't send it.
+- **From a copy of the site.** Select a folder or ZIP holding the site's `.repo` folder and the package files where they sit on the site. The address is worked out from the links. Packages that aren't in the copy are downloaded from their links when the host allows it; otherwise they're listed exactly as before, and their file can be selected by hand later. Just the `.repo` folder works too.
+
+Mod or game comes from the repository's listing, as in Hakchi2 CE. Games and mods without a readme of their own take their readme from the repository.
+
+Publishing an opened repository (**Download update** on the Publish tab) keeps its layout:
+
+- Unchanged packages keep their link, md5, sha1 and readme, and aren't in the download.
+- Changed packages are uploaded to the same path as before, with new hashes. One hosted on another site is put in `other-hosts/<host>/…` to upload there by hand.
+- New packages go into a folder the site already has, picked on the Repository tab (the folder holding most packages of that kind is preselected). No new folders are created.
+- The site's own pages are left alone: no `index.html` or `.nojekyll` is written. `UPLOAD.md` in the download lists what to upload and which files nothing links to any more.
+
+An opened repository is updated where it's hosted, so GitHub Pages publishing is off for it, and its settings aren't saved in the browser. **Close this repository** on the Repository tab goes back to your own.
 
 ### Mod or Game/Port
 
@@ -90,7 +121,7 @@ The first time, turn Pages on in the repository's **Settings → Pages**: "Deplo
 
 ### To any other web host
 
-Under **Your Mod Hub site** choose **My own web host**, enter the address the files will live at, and click **Download repository**. Unzip it and upload everything, including the hidden `.repo` folder, to that address. A browser can't upload to a web host by itself, so this step is manual.
+Under **Your Mod Hub site** choose **My own web host**, enter the address the files will live at, and click **Download repository**. Unzip it and upload everything, including the hidden `.repo` folder, to that address. A browser can't upload to a web host by itself, so this step is manual. For a repository opened from its site, the button is **Download update**; see [Open an existing repository](#open-an-existing-repository).
 
 ### To a central repository, by pull request
 
@@ -157,19 +188,20 @@ Hakchi2 CE extracts a `.clvg` and imports the `.desktop` file at its top level (
 
 ## Packing
 
-The tool writes a gzip tar owned by root:root. Files in exec folders and marked executables get mode 755; everything else gets 644. The readme is regenerated as `readme.md` from the editor.
+The tool writes a gzip tar owned by root:root. Files in exec folders and marked executables get mode 755; everything else gets 644. The readme is regenerated as `readme.md` from the editor. ZIP and 7z packages are written in their own format with the same contents, or published as the original file when nothing changed.
 
 ## Repository export
 
 The zip is laid out like this:
 
 ```
-hmods/<name>.hmod
-games/<name>.clvg
+hmods/<name>.hmod           (or <name>.zip / <name>.7z)
+games/<name>.clvg           (or <name>.zip / <name>.7z)
 .repo/pack.tgz              read by Hakchi2 CE's Mod Hub
 .repo/list                  read by `hmod rlist` on the console
 .repo/<name>.hmod/link      read by `hmod rinstall`
 .repo/<name>.hmod/md5, sha1, readme.md
+.repo/<name>.hmod/extract   for ZIP and 7z modules: Hakchi2 CE extracts them
 .repo/readme.md
 .nojekyll                   lets GitHub Pages serve .repo
 index.html                  human-readable listing
@@ -186,13 +218,13 @@ npm test          # runs the test suite
 npm run build     # rebuilds dist/index.html from src/
 ```
 
-The tests build every fixture package in memory (`test/helpers.js`), so they need no sample files, network access or other repositories. They cover the tar and gzip code, readme parsing, each validation rule and fix, mod/game detection, nested archives, console targets, packing and the repository export, including the exact patterns Hakchi2 CE uses to read `pack.tgz`.
+The tests build every fixture package in memory (`test/helpers.js`), so they need no sample files, network access or other repositories. They cover the tar and gzip code, readme parsing, each validation rule and fix, mod/game detection, nested archives, console targets, packing (including ZIP and 7z) and the repository export, including the exact patterns Hakchi2 CE uses to read `pack.tgz`, and opening an existing repository laid out like a real one (packages outside `hmods/`, upper-case hashes with Windows line endings, duplicate list entries, a dead link, a package on another host).
 
 Publishing and submitting are tested against `test/fake-github.js`, an in-memory stand-in for the parts of the GitHub API the tool uses, so the tests never touch real GitHub. The central-repository scripts in `ci/` are run the way the workflows run them.
 
 `dist/index.html` is committed so people can download the tool without building it. Rebuild and commit it with any change to `src/`; CI fails if it is out of date.
 
-The built page loads React, ReactDOM, JSZip and SparkMD5 from cdnjs, and its fonts from Google Fonts, so it needs an internet connection when it opens.
+The built page loads React, ReactDOM, JSZip and SparkMD5 from cdnjs, and its fonts from Google Fonts, so it needs an internet connection when it opens. 7-Zip (`7z-wasm`) loads from jsDelivr only when a 7z archive is opened or written; the tests use the npm copy.
 
 ## Source layout
 
@@ -200,11 +232,13 @@ The built page loads React, ReactDOM, JSZip and SparkMD5 from cdnjs, and its fon
 |---|---|
 | `src/rules.js` | Validation rules, fixes, install destinations, file modes |
 | `src/targets.js` | NES / SNES / SEGA targets and their checks |
-| `src/model.js` | Importing archives and folders, mod/game detection, renaming |
+| `src/model.js` | Importing archives and folders, mod/game detection, renaming, unchanged-package tracking |
+| `src/archive.js` | ZIP and 7z reading and writing |
+| `src/import.js` | Opening an existing repository: by address or from a copy of the site |
 | `src/tar.js` | ustar reader and writer, gzip |
 | `src/readme.js` | Front matter parser, same regex as Hakchi2 CE |
 | `src/pack.js` | `.hmod` / `.clvg` packing |
-| `src/repo.js` | Repository export |
+| `src/repo.js` | Repository export, where each package goes (including opened repositories) |
 | `src/github.js` | GitHub API client (commits through the Git database API) |
 | `src/publish.js` | Publishing to GitHub Pages, custom domains |
 | `src/packageid.js` | Package ID format, namespaces, reserved words, suggested IDs |

@@ -2,8 +2,13 @@ import { buildTar, gzip, textBytes } from './tar.js';
 import { serializeReadme } from './readme.js';
 import { fileMode, CONTROL_FILES, cleanName } from './rules.js';
 import { resolveTargets, formatConsolesField, TARGET_IDS } from './targets.js';
+import { writeZip, write7z, FORMATS } from './archive.js';
+import { isUnchanged } from './model.js';
 
+// The name the repository lists the package under. A package opened from an
+// existing repository keeps its listed name until it's renamed here.
 export function hmodFileName(mod) {
+  if (mod.origin && mod.name === mod.origin.name) return mod.origin.fileName;
   // Hakchi2 CE cleans hmod names (Hmod.GetCleanName); game archives keep their name.
   if (mod.kind === 'game') return `${mod.name.replace(/[\\/:*?"<>|]/g, '_') || 'game'}.clvg`;
   return `${cleanName(mod.name) || 'mod'}.hmod`;
@@ -48,4 +53,25 @@ function mergeTree(dirs, files) {
 
 export async function packHmod(mod) {
   return gzip(buildTar(packEntries(mod)));
+}
+
+// The name of the package's file on the web host. ZIP and 7z packages keep
+// their extension there; the repository still lists them as .hmod / .clvg.
+export function serverFileName(mod) {
+  const listed = hmodFileName(mod);
+  return mod.format ? listed.replace(/\.(hmod|clvg)$/i, '') + FORMATS[mod.format].ext : listed;
+}
+
+// True when the package is published as the file it was opened from.
+export const keepsOriginal = (mod) => !!(mod.original && mod.original.bytes && (mod.format || mod.origin) && isUnchanged(mod));
+
+// The bytes to publish: the original file when nothing changed (for ZIP, 7z and
+// packages opened from an existing repository), otherwise freshly packed in the
+// package's own format.
+export async function packPackage(mod) {
+  if (keepsOriginal(mod)) return mod.original.bytes;
+  if (mod.unavailable) throw new Error(`${hmodFileName(mod)} couldn't be downloaded, so it can't be packed.`);
+  if (mod.format === 'zip') return writeZip(packEntries(mod));
+  if (mod.format === '7z') return write7z(packEntries(mod));
+  return packHmod(mod);
 }
