@@ -515,7 +515,6 @@ function ConsolePicker({ mod, update }) {
     update({ ...mod, targets: TARGET_IDS.filter((x) => next.includes(x)) });
   };
   const caption = {
-    manual: 'Set by you',
     readme: 'From the readme\'s Consoles field',
     contents: `Detected: ${[...new Set(detected.evidence.map((e) => e.reason))].slice(0, 2).join('; ')}`,
     none: 'Nothing console-specific found, so all consoles',
@@ -529,8 +528,7 @@ function ConsolePicker({ mod, update }) {
             title={TARGETS[t].consoles}>{TARGETS[t].label}</button>
         ))}
       </div>
-      <span className="muted small">{caption}</span>
-      {from === 'manual' && <button className="linkish small" onClick={() => update({ ...mod, targets: null })}>Reset</button>}
+      {caption && <span className="muted small">{caption}</span>}
     </div>
   );
 }
@@ -618,7 +616,7 @@ function ModView({ mod, update, remove, notify, goPublish }) {
                   onClick={() => update(setKind(mod, k))}>{v.label} <span className="mono">{v.ext}</span></button>
               ))}
             </div>
-            <span className="muted small">{{ contents: 'Detected from its contents', name: 'From the file name (contents were unclear)', default: 'Defaulted to mod (contents were unclear)', manual: 'Set by you', repository: 'From the repository\'s listing' }[mod.source?.kindFrom || 'name']}</span>
+            {mod.source?.kindFrom !== 'manual' && <span className="muted small">{{ contents: 'Detected from its contents', name: 'From the file name (contents were unclear)', default: 'Defaulted to mod (contents were unclear)', repository: 'From the repository\'s listing' }[mod.source?.kindFrom || 'name']}</span>}
           </div>
           <ConsolePicker mod={mod} update={update} /></>}
         </div>
