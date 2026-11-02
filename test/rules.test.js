@@ -151,3 +151,20 @@ test('dismissed findings stay hidden', async () => {
   assert.ok(ids(validate(m)).includes('readme-missing'));
   assert.ok(!ids(validate({ ...m, dismissed: ['readme-missing'] })).includes('readme-missing'));
 });
+
+test('a non-zero return at the end of install turns the copy off, so root files are fine', async () => {
+  const { modFromArchive } = await import('../src/model.js');
+  const { destination, skipsDefaultCopy } = await import('../src/rules.js');
+  const install = '# snes_unlock_sfox2\nlocal gamesavepath=$mountpoint/var/lib/clover/profiles/0\n\ncopy "$transferpath/unlock" "$gamesavepath/StarFox-TheEnd.txt"\ncfg_snes_unlock_sfox2_enabled=\'y\'\nreturn 1\n';
+  const mod = await modFromArchive('t.hmod', await tgz({ 'readme.md': FULL_README, install, unlock: 'x' }));
+  assert.equal(skipsDefaultCopy(mod), 'install');
+  const found = ids(validate(mod));
+  assert.ok(!found.includes('loose-root'));
+  assert.ok(found.includes('no-default-copy'));
+  assert.match(destination('unlock', 'hmod', false).label, /\$transferpath/);
+  assert.equal(destination('readme.md', 'hmod', false).label, 'Deleted before copy');
+
+  const copying = await modFromArchive('t.hmod', await tgz({ 'readme.md': FULL_README, install: install.replace('return 1', 'return 0'), unlock: 'x' }));
+  assert.equal(skipsDefaultCopy(copying), null);
+  assert.ok(ids(validate(copying)).includes('loose-root'), 'with return 0 the file really lands in /');
+});

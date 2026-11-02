@@ -1,6 +1,6 @@
 import { modFromArchive, modFromFolder, modsFromPackageFolder, looksLikePackageFolder, setKind, renameFile, totalSize, KINDS, ACCEPTED_EXTENSIONS, isUnchanged, formatLabel } from './model.js';
 import { TARGETS, TARGET_IDS, resolveTargets, detectTargets } from './targets.js';
-import { validate, applyFix, applyAllFixes, AUTO_FIX_IDS, destination, fileMode, cleanName, OVERLAY_ROOTS, CONTROL_FILES } from './rules.js';
+import { validate, applyFix, applyAllFixes, AUTO_FIX_IDS, destination, fileMode, cleanName, OVERLAY_ROOTS, CONTROL_FILES, skipsDefaultCopy } from './rules.js';
 import { packPackage, hmodFileName, readmeText, serverFileName, keepsOriginal } from './pack.js';
 import { buildRepoFiles, buildRepoZip, repoIssues, modLink, normalizeBase, packagePlacement, siteFolders, defaultFolder, staleFiles } from './repo.js';
 import { importRepository, readRepositoryIndex, siteFromFiles, siteFromAddress, addressForCopy, attachFile } from './import.js';
@@ -236,7 +236,7 @@ function FileRow({ file: f, mod, update, remove }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(f.path);
   const [error, setError] = useState(null);
-  const d = destination(editing ? value.replace(/^\/+/, '') : f.path, mod.kind);
+  const d = destination(editing ? value.replace(/^\/+/, '') : f.path, mod.kind, !skipsDefaultCopy(mod));
   const commit = () => {
     const r = renameFile(mod, f.path, value);
     if (r.error) { setError(r.error); return; }

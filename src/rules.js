@@ -57,6 +57,21 @@ function hasTopLevelReturn(code) {
   return false;
 }
 const lastCodeLine = (s) => stripComments(s).split('\n').map((l) => l.trim()).filter(Boolean).pop() || '';
+
+// hakchi copies a module's files into / only when install and transfer both
+// succeed (transfer_path in b0030_package: `transfer_file install || docopy=n`).
+// A script that ends with `return 1` (or any non-zero number) turns the copy
+// off on purpose and uses the files from $transferpath itself.
+// Returns the script that does it, or null when the files are copied.
+export function skipsDefaultCopy(mod) {
+  if (mod.kind === 'game') return null;
+  for (const name of ['install', 'transfer']) {
+    const f = mod.files.find((x) => x.path === name);
+    if (!f || !isText(f.data)) continue;
+    if (/^return\s+0*[1-9]\d*\s*;?$/.test(lastCodeLine(bytesText(f.data).replace(/\r\n/g, '\n')))) return name;
+  }
+  return null;
+}
 const top = (p) => p.split('/')[0];
 
 export function cleanName(name) {
@@ -312,12 +327,19 @@ function validateContent(mod, original) {
     if (RUNTIME_ROOTS.includes(t)) runtimeRoot.push(p);
     else if (!OVERLAY_ROOTS.includes(t)) unknownRoot.push(p);
   }
-  if (loose.length) add('loose-root', 'warning', 'Files at the package root',
-    'Loose files at the root are copied straight into / on the console. That is almost never intended; put them under a real folder such as usr/share/<your-mod>/.', loose);
-  if (unknownRoot.length) add('unknown-root', 'warning', 'Installs outside the usual system folders',
-    `These go into top-level folders the console doesn't have. hakchi only overlays ${OVERLAY_ROOTS.map((r) => '/' + r).join(', ')} reliably.`, unknownRoot);
-  if (runtimeRoot.length) add('runtime-root', 'warning', 'Installs into a folder that gets mounted over',
-    '/var, /tmp, /media and similar are mounted at boot, which hides anything an hmod puts there. Use a preinit script to copy or link files there at boot instead.', runtimeRoot);
+  const noCopy = skipsDefaultCopy(mod);
+  if (noCopy) {
+    // Nothing is copied into /, so where files sit in the package doesn't matter.
+    add('no-default-copy', 'info', `\`${noCopy}\` handles the files itself`,
+      `${noCopy} ends with a non-zero \`return\`, so hakchi skips copying the package into / and the files are only used from \`$transferpath\` by the script.`, [noCopy]);
+  } else {
+    if (loose.length) add('loose-root', 'warning', 'Files at the package root',
+      'Loose files at the root are copied straight into / on the console. That is almost never intended; put them under a real folder such as usr/share/<your-mod>/. If install uses them from $transferpath and should copy nothing, end it with `return 1`.', loose);
+    if (unknownRoot.length) add('unknown-root', 'warning', 'Installs outside the usual system folders',
+      `These go into top-level folders the console doesn't have. hakchi only overlays ${OVERLAY_ROOTS.map((r) => '/' + r).join(', ')} reliably.`, unknownRoot);
+    if (runtimeRoot.length) add('runtime-root', 'warning', 'Installs into a folder that gets mounted over',
+      '/var, /tmp, /media and similar are mounted at boot, which hides anything an hmod puts there. Use a preinit script to copy or link files there at boot instead.', runtimeRoot);
+  }
   if (nested.length) add('nested-hmod', 'warning', 'Contains other .hmod files',
     'pack_install skips anything named *.hmod, so these are silently dropped. Publish them as separate mods.', nested, 'Remove nested hmods');
   if (droppedDocs.length) add('dropped-docs', 'info', 'Extra docs at the root are not installed',
@@ -442,7 +464,8 @@ export function applyAllFixes(mod) {
 }
 
 // Where a package path ends up on the console.
-export function destination(path, kind = 'hmod') {
+// copies: false when install or transfer turns hakchi's copy off (skipsDefaultCopy).
+export function destination(path, kind = 'hmod', copies = true) {
   if (kind === 'game') {
     if (/\.desktop$/i.test(path) && !path.includes('/')) return { kind: 'boot', label: 'Game entry, read on import' };
     return { kind: 'file', label: 'Game folder · ' + path };
@@ -450,6 +473,7 @@ export function destination(path, kind = 'hmod') {
   if (CONTROL_FILES.includes(path)) return { kind: 'control', label: 'Run by hakchi at install' };
   if (/\.hmod(\/|$)/i.test(path)) return { kind: 'skipped', label: 'Skipped by hakchi' };
   if (!path.includes('/') && (/^readme(\..*)?$/i.test(path) || /\.(txt|md)$/i.test(path))) return { kind: 'skipped', label: 'Deleted before copy' };
+  if (!copies) return { kind: 'control', label: 'Not copied; the install script uses it from $transferpath' };
   if (path.startsWith(PREINIT_DIR)) {
     const ok = PREINIT_NAME_RE.test(path.slice(PREINIT_DIR.length));
     return { kind: ok ? 'boot' : 'dead', label: ok ? '/' + path + ' · runs at boot' : '/' + path + ' · never runs' };
