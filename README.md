@@ -27,7 +27,6 @@ There are four ways to add packages on the Packages tab:
 | Select a module | A `.hmod` module or `.clvg` game file (or several), the two package types Hakchi2 CE's Mod Hub knows, or a `.zip` / `.7z` one |
 | Select an unpacked module | One folder you're building a module in (`readme.md`, `install`, `etc/`, `usr/`…). It's checked and packed into a `.hmod` |
 | Select multiple packages | A folder holding `.hmod` / `.clvg` files and unpacked `*.hmod` / `*.clvg` folders, the way Hakchi2 CE keeps `user_mods`. Each becomes its own package; other files are ignored |
-
 | Open an existing repository | A Mod Hub site you already run, to manage its packages here (see below) |
 
 Dragging a folder onto the page works out which of the middle two it is.
