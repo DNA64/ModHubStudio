@@ -102,6 +102,15 @@ Files inside a package can be renamed or moved from the Files tab by typing a ne
 
 Everything here is on the **Publish** tab. Connect your GitHub account once at the top; it's used for GitHub Pages and for central-repository submissions. Each package is checked before it goes anywhere.
 
+### Ready to publish
+
+Every package has a **Ready to publish** checkbox at the top of its Readme tab. It can only be ticked once **Name, Creator, Category and Version** are filled in, and clearing one of them unticks it. The other fields (Maintainer, Emulated System, Prerequisite, Command Line, Tags) show a warning there when empty, but don't block anything.
+
+- **A whole repository** (GitHub Pages or your own host) won't publish until every package is ticked. The Publish tab lists the ones that aren't, with what each is missing, and **Confirm all complete readmes** ticks every package that already has the four required fields, so only the rest need opening.
+- **A single package** sent to a central repository can't be checked or submitted until it's ticked.
+- **Downloading one package** from its Package tab isn't publishing, so it only shows a reminder.
+- In an opened repository, packages that are published unchanged count as ready. A changed or new package needs the tick.
+
 ### To your own GitHub Pages site
 
 Under **Your own Mod Hub site** choose **GitHub Pages**, enter a repository you own (for example `you/hmods`; create it on GitHub first, it can be empty) and the branch, and click **Publish to GitHub Pages**. The tool commits the whole repository site in one commit:
@@ -234,6 +243,7 @@ The built page loads React, ReactDOM, JSZip and SparkMD5 from cdnjs, and its fon
 | `src/model.js` | Importing archives and folders, mod/game detection, renaming, unchanged-package tracking |
 | `src/archive.js` | ZIP and 7z reading and writing |
 | `src/import.js` | Opening an existing repository: by address or from a copy of the site |
+| `src/ready.js` | Ready to publish: required readme fields and the confirmation tick |
 | `src/tar.js` | ustar reader and writer, gzip |
 | `src/readme.js` | Front matter parser, same regex as Hakchi2 CE |
 | `src/pack.js` | `.hmod` / `.clvg` packing |

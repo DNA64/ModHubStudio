@@ -238,6 +238,16 @@ export function validate(mod) {
 
 // .clvg game archives: Hakchi2 CE extracts them and imports the top-level *.desktop
 // (Tasks/AddGamesTask.cs), the same layout GameTask.Archive writes.
+// Name, Creator, Category and Version are required before a package can be
+// published. For a module they're in its readme.md; for a game, in its Mod Hub
+// listing. A central repository keeps no listing for games, so there it's a warning.
+function readmeFields(mod, add) {
+  const missing = REQUIRED_FIELDS.filter((k) => !String(mod.readme.front[k] || '').trim());
+  if (!missing.length) return;
+  add('readme-fields', mod.kind === 'game' ? 'warning' : 'error', `Readme missing ${missing.join(', ')}`,
+    'Name, Creator, Category and Version are required before publishing. The Mod Hub lists packages by them: without Name it shows the file name, and without Version users can\'t tell when to update. Fill them in on the Readme tab.');
+}
+
 function validateGame(mod, issues, add) {
   const junk = mod.files.filter((f) => JUNK_RE.test(f.path)).map((f) => f.path);
   if (junk.length) add('junk', 'warning', 'OS junk files included',
@@ -275,6 +285,7 @@ function validateGame(mod, issues, add) {
       `Hakchi2 CE shows the game with a placeholder until ${code}.png is added.`, [`${code}.png`]);
   }
   validateTargets(view, add);
+  readmeFields(mod, add);
   return issues.filter((i) => !new Set(mod.dismissed || []).has(i.id));
 }
 
@@ -435,10 +446,7 @@ function validateContent(mod, original) {
   }
   if (mod.readmeProblem === 'not-at-top') add('readme-top', 'error', 'Readme front matter isn\'t at the very top',
     'Hakchi2 CE only reads the --- block when it is the first thing in the file, so Name, Creator and Version are ignored. Packing here writes it correctly.', [mod.readmeFound], 'Write it at the top');
-  const missing = REQUIRED_FIELDS.filter((k) => !String(mod.readme.front[k] || '').trim());
-  if (missing.length) add('readme-fields', missing.includes('Name') || missing.includes('Version') ? 'warning' : 'info',
-    `Readme missing ${missing.join(', ')}`,
-    'The Mod Hub lists mods by these fields; without Name it falls back to the file name and without Version users can\'t tell when to update.');
+  readmeFields(mod, add);
 
   validateTargets(mod, add);
   return issues;

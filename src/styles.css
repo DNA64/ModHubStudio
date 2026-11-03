@@ -299,3 +299,12 @@ a.btn { text-decoration: none; display: inline-block; }
 /* Disabled choices in a segmented control (an opened repository can't move to GitHub Pages). */
 .segmented button:disabled { opacity: .45; cursor: not-allowed; }
 .link-cell select { max-width: 100%; }
+
+/* Ready to publish, on the Readme tab and the Publish tab. */
+.ready-box { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--raise); }
+.ready-check { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.ready-check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.ready-check input:disabled { cursor: not-allowed; }
+.ready-box .callout { margin: 0; }
+.not-ready { margin: 0; padding-left: 1.1rem; max-height: 14rem; overflow-y: auto; }
+.not-ready li { margin: 2px 0; }

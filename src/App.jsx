@@ -6,7 +6,8 @@ import { buildRepoFiles, buildRepoZip, repoIssues, modLink, normalizeBase, packa
 import { importRepository, readRepositoryIndex, siteFromFiles, siteFromAddress, addressForCopy, attachFile } from './import.js';
 import { readZip } from './archive.js';
 import { isZip } from './tar.js';
-import { CATEGORIES, STANDARD_FIELDS, MANAGED_FIELDS } from './readme.js';
+import { CATEGORIES, STANDARD_FIELDS, MANAGED_FIELDS, REQUIRED_FIELDS } from './readme.js';
+import { isReady, setReady, missingRequired, missingOptional, alreadyPublished, confirmComplete } from './ready.js';
 import { exampleMods } from './examples.js';
 import { createClient, parseRepoName } from './github.js';
 import { publishToPages, pagesUrl, pagesIssues } from './publish.js';
@@ -150,7 +151,7 @@ function Logo() {
 function Counts({ issues, compact }) {
   const c = { error: 0, warning: 0, info: 0 };
   for (const i of issues) c[i.severity]++;
-  if (!c.error && !c.warning) return <span className="pill pill-ok">{compact ? 'Ready' : 'Ready to publish'}</span>;
+  if (!c.error && !c.warning) return <span className="pill pill-ok">{compact ? 'Passes' : 'Passes all checks'}</span>;
   return (
     <span className="counts">
       {c.error > 0 && <span className="pill pill-error">{c.error} {compact ? 'err' : c.error === 1 ? 'error' : 'errors'}</span>}
@@ -308,6 +309,9 @@ function FilesTab({ mod, update }) {
 
 // Hint text for the readme fields. Hakchi2 CE shows any field it doesn't use by name as "Field: value".
 const PLACEHOLDERS = {
+  Name: 'shown in the Mod Hub',
+  Creator: 'who made it',
+  Category: 'pick or type one',
   Maintainer: 'optional',
   Version: '1.0.0',
   'Emulated System': 'optional',
@@ -316,18 +320,41 @@ const PLACEHOLDERS = {
   Tags: 'optional',
 };
 
+function ReadyToPublish({ mod, update }) {
+  const missing = missingRequired(mod);
+  const optional = missingOptional(mod);
+  const published = alreadyPublished(mod);
+  return (
+    <div className="stack ready-box">
+      <label className="check ready-check">
+        <input type="checkbox" checked={isReady(mod)} disabled={published || missing.length > 0}
+          onChange={(e) => update(setReady(mod, e.target.checked))} />
+        <span><strong>Ready to publish</strong>{published && <span className="muted small"> · already published unchanged</span>}</span>
+      </label>
+      {!published && missing.length > 0 && <p className="callout callout-error small">Fill in {missing.join(', ')} before this package can be published.</p>}
+      {!published && !missing.length && !isReady(mod) && <p className="muted small">Check the readme, then tick this. It can't be published until it's ticked.</p>}
+      {optional.length > 0 && <p className="callout callout-warning small">Not filled in: {optional.join(', ')}. Fill in any that apply to this package.</p>}
+    </div>
+  );
+}
+
 function ReadmeTab({ mod, update }) {
-  const set = (k, v) => update({ ...mod, readme: { ...mod.readme, front: { ...mod.readme.front, [k]: v } } });
+  // Clearing a required field unticks Ready to publish.
+  const set = (k, v) => {
+    const next = { ...mod, readme: { ...mod.readme, front: { ...mod.readme.front, [k]: v } } };
+    update(next.ready && missingRequired(next).length ? { ...next, ready: false } : next);
+  };
   const extra = Object.keys(mod.readme.front).filter((k) => !STANDARD_FIELDS.includes(k) && !MANAGED_FIELDS.includes(k));
   return (
     <div className="readme-grid">
       <div className="stack">
+        <ReadyToPublish mod={mod} update={update} />
         <div className="fields">
           {STANDARD_FIELDS.map((k) => (
             <label key={k} className="field">
-              <span>{k}</span>
+              <span>{k}{REQUIRED_FIELDS.includes(k) && <span className="muted"> · required</span>}</span>
               <input id={`fm-${mod.id}-${k}`} value={mod.readme.front[k] || ''} list={k === 'Category' ? 'categories' : undefined}
-                placeholder={k === 'Name' ? mod.name : PLACEHOLDERS[k] || ''}
+                placeholder={PLACEHOLDERS[k] || ''}
                 onChange={(e) => set(k, e.target.value)} />
             </label>
           ))}
@@ -434,6 +461,8 @@ function SubmitItem({ mod, issues, central, github, notify, open }) {
             <a className="btn btn-small" href={done.url} target="_blank" rel="noopener noreferrer">View pull request #{done.number}</a>
           ) : localErrors > 0 ? (
             <span className="muted small">Fix {localErrors === 1 ? 'its error' : `its ${localErrors} errors`} first</span>
+          ) : !isReady(mod) ? (
+            <span className="muted small">Tick <button className="linkish small" onClick={open}>Ready to publish</button> on its Readme tab first</span>
           ) : (
             <>
               <button className="btn btn-small" disabled={!ready || !!busy} onClick={check}>{busy === 'check' ? 'Checking…' : prep ? 'Check again' : 'Check'}</button>
@@ -498,6 +527,7 @@ function PackageTab({ mod, issues, notify, goPublish }) {
         </>}
       </dl>
       {errors > 0 && <p className="callout callout-error">There {errors === 1 ? 'is 1 error' : `are ${errors} errors`} in Checks. You can still pack, but the mod won't install correctly until they're fixed.</p>}
+      {!isReady(mod) && <p className="callout callout-warning">Not marked Ready to publish yet. You can download it, but check the Readme tab and tick Ready to publish before putting it in a repository.</p>}
       <div className="row">
         <button className="btn btn-primary" disabled={busy} onClick={pack}>{busy ? 'Packing…' : `Download ${serverFileName(mod)}`}</button>
       </div>
@@ -574,8 +604,8 @@ function OriginNote({ mod }) {
   );
 }
 
-function ModView({ mod, update, remove, notify, goPublish }) {
-  const [tab, setTab] = useState('checks');
+function ModView({ mod, update, remove, notify, goPublish, initialTab }) {
+  const [tab, setTab] = useState(initialTab || 'checks');
   const issues = useMemo(() => validate(mod), [mod]);
   const idOk = isPackageId(mod.name);
   const nameIssue = (mod.kind !== 'game' && cleanName(mod.name) !== mod.name) || !idOk;
@@ -927,9 +957,39 @@ function RepoView({ repo, setRepo, mods, updateMod, open, goPublish, closeImport
   );
 }
 
-function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
+function NotReadyList({ mods, open, confirmAll }) {
+  const notReady = mods.filter((m) => !isReady(m));
+  if (!notReady.length) return null;
+  const complete = notReady.filter((m) => !missingRequired(m).length).length;
+  return (
+    <div className="callout callout-warning stack">
+      <strong>{notReady.length === 1 ? '1 package isn\'t' : `${notReady.length} packages aren't`} marked Ready to publish</strong>
+      <span className="small">Publishing waits until every package is. Open each one, check its readme and tick Ready to publish on its Readme tab.</span>
+      <ul className="not-ready">
+        {notReady.map((m) => {
+          const missing = missingRequired(m);
+          return (
+            <li key={m.id}>
+              <button className="linkish small" onClick={() => open(m.id, 'readme')}>{m.readme.front.Name || m.name}</button>
+              <span className="small"> · {missing.length ? `missing ${missing.join(', ')}` : 'readme complete, not ticked yet'}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {complete > 0 && (
+        <div className="row">
+          <button className="btn btn-small" onClick={confirmAll}>Confirm all complete readmes</button>
+          <span className="small">Ticks the {complete === 1 ? 'package' : `${complete} packages`} with Name, Creator, Category and Version filled in{complete < notReady.length ? '; the rest still need those fields' : ''}.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PublishView({ repo, setRepo, mods, notify, github, setGithub, open, confirmAll }) {
   const [busy, setBusy] = useState(false);
   const { base, effective, problems, modIssues, hosting } = useRepoBasics(repo, mods);
+  const notReady = mods.filter((m) => !isReady(m)).length;
   const blocking = problems.filter((p) => p.severity === 'error');
   const central = parseRepoName(repo.central);
 
@@ -984,8 +1044,9 @@ function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
           {modIssues.some((iss) => iss.some((x) => x.severity === 'error')) && (
             <p className="callout callout-warning">Some packages still have errors. They'll be published as they are.</p>
           )}
+          <NotReadyList mods={mods} open={open} confirmAll={confirmAll} />
           {hosting === 'pages' ? (
-            <PagesPublish repo={repo} setRepo={setRepo} mods={mods} github={github} notify={notify} blocking={blocking.length > 0} />
+            <PagesPublish repo={repo} setRepo={setRepo} mods={mods} github={github} notify={notify} blocking={blocking.length > 0 || notReady > 0} />
           ) : (
             <div className="stack">
               <label className="field"><span>Hosted at</span>
@@ -994,7 +1055,7 @@ function PublishView({ repo, setRepo, mods, notify, github, setGithub, open }) {
                 <small className="muted">The exact address the files will live at. Users add it in Hakchi2 CE under Modules → Mod Hub → Repositories.</small>
               </label>
               <div className="row">
-                <button className="btn btn-primary" disabled={busy || blocking.length > 0} onClick={exportRepo}>{busy ? 'Building…' : repo.imported ? 'Download update' : 'Download repository'}</button>
+                <button className="btn btn-primary" disabled={busy || blocking.length > 0 || notReady > 0} onClick={exportRepo}>{busy ? 'Building…' : repo.imported ? 'Download update' : 'Download repository'}</button>
                 {repo.imported
                   ? <span className="muted small">It holds the new <code>.repo</code> and only the packages that changed or are new, in the site's own folders. Upload it over the site; <code>UPLOAD.md</code> inside lists what to upload and what can be deleted.</span>
                   : <span className="muted small">Unzip it and upload everything, including the hidden <code>.repo</code> folder, to that address. <code>HOSTING.md</code> inside has the details.</span>}
@@ -1058,7 +1119,9 @@ export function App() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
-  const open = (id) => { setSelected(id); setImporting(false); setView('packages'); };
+  // tab: open the package on this tab (used by the Ready to publish list).
+  const [openTab, setOpenTab] = useState(null);
+  const open = (id, tab = null) => { setSelected(id); setOpenTab(tab); setImporting(false); setView('packages'); };
   const [repo, setRepoState] = useState(savedRepo);
 
   // The token is kept only for this tab unless the person ticks Remember.
@@ -1183,9 +1246,9 @@ export function App() {
             <ul className="rail-list">
               {mods.map((m) => (
                 <li key={m.id}>
-                  <button className={`rail-item ${!importing && current && current.id === m.id ? 'on' : ''}`} onClick={() => { setSelected(m.id); setImporting(false); }}>
+                  <button className={`rail-item ${!importing && current && current.id === m.id ? 'on' : ''}`} onClick={() => { setSelected(m.id); setOpenTab(null); setImporting(false); }}>
                     <span className="rail-title">{m.readme.front.Name || m.name}{m.source?.example && <span className="pill pill-example">Example</span>}</span>
-                    <span className="rail-meta"><span className="mono small muted">{hmodFileName(m)}</span>{m.unavailable ? <span className="pill pill-warning">Not downloaded</span> : <Counts issues={allIssues.get(m.id) || []} compact />}</span>
+                    <span className="rail-meta"><span className="mono small muted">{hmodFileName(m)}</span>{m.unavailable ? <span className="pill pill-warning">Not downloaded</span> : <Counts issues={allIssues.get(m.id) || []} compact />}{!m.unavailable && isReady(m) && <span className="pill pill-ok" title="Ready to publish">Ready</span>}</span>
                   </button>
                 </li>
               ))}
@@ -1215,7 +1278,7 @@ export function App() {
             {importing
               ? <ImportPane repo={repo} hasPackages={mods.some((m) => !m.source?.example)} onImported={onImported} onClose={() => setImporting(false)} />
               : current
-              ? <ModView key={current.id} mod={current} update={updateMod} remove={() => removeMod(current.id)} notify={notify} goPublish={() => setView('publish')} />
+              ? <ModView key={`${current.id}-${openTab || ''}`} mod={current} initialTab={openTab} update={updateMod} remove={() => removeMod(current.id)} notify={notify} goPublish={() => setView('publish')} />
               : (
                 <section className="pane">
                   <div className="empty-start">
@@ -1230,7 +1293,8 @@ export function App() {
         <div className="single">
           {view === 'repository'
             ? <RepoView repo={repo} setRepo={setRepo} mods={mods} updateMod={updateMod} open={open} goPublish={() => setView('publish')} closeImported={closeImported} />
-            : <PublishView repo={repo} setRepo={setRepo} mods={mods} notify={notify} github={github} setGithub={setGithub} open={open} />}
+            : <PublishView repo={repo} setRepo={setRepo} mods={mods} notify={notify} github={github} setGithub={setGithub} open={open}
+                confirmAll={() => { const n = mods.filter((m) => !isReady(m) && !missingRequired(m).length).length; setMods((ms) => confirmComplete(ms)); notify(`Marked ${n} package${n === 1 ? '' : 's'} Ready to publish.`); }} />}
         </div>
       )}
       {dragging && <div className="drag-overlay"><span>Drop to add to the repository</span></div>}
