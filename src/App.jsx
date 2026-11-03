@@ -667,8 +667,8 @@ function MissingFile({ mod, update, notify }) {
       <p>The repository keeps listing it exactly as before: same link, hashes and readme. To check or edit it, download its file yourself and select it here.</p>
       <p className="muted small mono">{mod.origin.link}</p>
       <div className="row">
-        <button className="btn btn-primary" disabled={busy} onClick={() => input.current.click()}>{busy ? 'Reading…' : 'Select its file'}</button>
-        <a className="btn" href={mod.origin.link} target="_blank" rel="noopener noreferrer">Open the link</a>
+        <button className="btn btn-primary" disabled={busy} onClick={() => input.current.click()}>{busy ? 'Reading…' : 'Load package'}</button>
+        <a className="btn" href={mod.origin.link} target="_blank" rel="noopener noreferrer">Download package</a>
       </div>
       <input ref={input} type="file" hidden onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; if (f) pick(f); }} />
       {error && <p className="callout callout-error">{error}</p>}
