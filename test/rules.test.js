@@ -8,15 +8,18 @@ import { validate, applyFix, applyAllFixes, destination, fileMode } from '../src
 const mod = async (spec, name = 'tester.test-mod.hmod') => modFromArchive(name, await tgz(spec));
 const blocking = (issues) => issues.filter((i) => i.severity !== 'info');
 
+// Consoles are chosen by the author; these tests are about other rules.
+const withConsoles = (m) => ({ ...m, targets: ['nes', 'snes', 'sega'] });
+
 test('a well-formed mod has no errors or warnings', async () => {
-  const m = await mod({
+  const m = withConsoles(await mod({
     'readme.md': FULL_README,
     install: 'mkdir -p "$rootfs/usr/share/test"\nreturn 0\n',
     uninstall: 'rm -rf "$rootfs/usr/share/test"\n',
     'etc/preinit.d/p8100_test': 'test_fn(){\n  return 0\n}\n',
     'usr/bin/test-tool': { data: '#!/bin/sh\necho hi\n', mode: 0o755 },
     'usr/share/test/data.bin': new Uint8Array(32),
-  });
+  }));
   assert.deepEqual(blocking(validate(m)), []);
 });
 
@@ -31,14 +34,14 @@ test('a wrapper folder is an error, and the rest is still checked', async () => 
 });
 
 test('rootfs prefix, capitalisation, backslashes and junk are fixable', async () => {
-  const m = await mod({
+  const m = withConsoles(await mod({
     'readme.md': FULL_README,
     'var/lib/hakchi/rootfs/usr/share/a.txt': 'a',
     'Usr/Share/b.txt': 'b',
     'usr\\share\\c.txt': 'c',
     '.DS_Store': 'junk',
     '__MACOSX/._x': 'junk',
-  });
+  }));
   const found = ids(validate(m));
   for (const id of ['rootfs-prefix', 'root-case', 'backslash-paths', 'junk']) assert.ok(found.includes(id), id);
   const fixed = applyAllFixes(m);

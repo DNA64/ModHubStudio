@@ -7,7 +7,7 @@ import { isReady, setReady, missingRequired, missingOptional, confirmComplete, a
 import { packageFromItem } from '../src/import.js';
 
 
-const mod = async (fields) => modFromArchive('tester.x.hmod', await tgz({ 'readme.md': readme(fields), 'usr/share/x/a': 'a' }));
+const mod = async (fields) => ({ ...(await modFromArchive('tester.x.hmod', await tgz({ 'readme.md': readme(fields), 'usr/share/x/a': 'a' }))), targets: ['snes'] });
 
 test('Name, Creator, Category and Version are required', async () => {
   const partial = await mod({ Name: 'X', Version: '1' });
@@ -23,7 +23,7 @@ test('Name, Creator, Category and Version are required', async () => {
 test('a game missing them is warned, not failed (a central repository keeps no listing for games)', async () => {
   const g = await modFromArchive('CLV-Z-ABCDE.clvg', await zip({ 'CLV-Z-ABCDE.desktop': desktop('CLV-Z-ABCDE', '/bin/x') }));
   assert.equal(validate(g).find((i) => i.id === 'readme-fields').severity, 'warning');
-  assert.deepEqual(missingRequired(g), ['Creator', 'Category', 'Version'], 'Name comes from the .desktop file');
+  assert.deepEqual(missingRequired(g), ['Creator', 'Category', 'Version', 'Consoles'], 'Name comes from the .desktop file');
 });
 
 test('Ready to publish can only be ticked when the required fields are filled', async () => {
@@ -55,4 +55,12 @@ test('packages published unchanged from an opened repository count as ready', as
   assert.ok(!alreadyPublished(edited) && !isReady(edited), 'once changed, it needs its readme and the tick');
   const { mod: gone } = await packageFromItem({ fileName: 'gone.hmod', link: 'https://x.example/m/gone.hmod' }, null, 'Dead link.');
   assert.ok(isReady(gone), "a package that couldn't be downloaded can't be changed");
+});
+
+test('at least one console must be selected before it is ready', async () => {
+  const full = await mod({ Name: 'X', Creator: 'me', Category: 'Tweak', Version: '1' });
+  const none = { ...full, targets: [] };
+  assert.deepEqual(missingRequired(none), ['Consoles']);
+  assert.equal(isReady(setReady(none, true)), false);
+  assert.equal(isReady(setReady(full, true)), true);
 });

@@ -20,28 +20,34 @@ test('the Consoles field accepts common spellings', () => {
   assert.equal(parseConsolesField('toaster'), null);
 });
 
-test('targets come from the readme, then the contents, then all', async () => {
+test('targets come from the buttons, then the readme; nothing is selected by default', async () => {
   const fromReadme = await mod({ 'readme.md': readme({ Name: 'x', Consoles: 'NES' }), 'usr/share/x': 'x' });
   assert.deepEqual(resolveTargets(fromReadme), { ids: ['nes'], from: 'readme' });
 
   const snesTheme = await mod({ 'readme.md': FULL_README, 'usr/share/ui/snes-usa/resources/bg.png': 'x' });
-  assert.deepEqual(resolveTargets(snesTheme), { ids: ['snes'], from: 'contents' });
+  assert.deepEqual(resolveTargets(snesTheme), { ids: [], from: 'none' }, 'contents only suggest');
+  assert.deepEqual(detectTargets(snesTheme).ids, ['snes']);
+  assert.match(validate(snesTheme).find((i) => i.id === 'targets-none').detail, /point at SNES/);
 
   const callsCanoe = await mod({ 'readme.md': FULL_README, 'etc/preinit.d/p8000_x': 'clover-canoe-shvc --flag\n' });
   assert.deepEqual(detectTargets(callsCanoe).ids, ['snes']);
 
   const generic = await mod({ 'readme.md': FULL_README, 'usr/share/x': 'x' });
-  assert.deepEqual(resolveTargets(generic), { ids: ['nes', 'snes', 'sega'], from: 'none' });
-  assert.ok(ids(validate(generic)).includes('targets-unknown'));
+  assert.deepEqual(resolveTargets(generic), { ids: [], from: 'none' });
+  assert.equal(validate(generic).find((i) => i.id === 'targets-none').severity, 'warning');
 
   const picked = { ...generic, targets: ['sega'] };
   assert.deepEqual(resolveTargets(picked), { ids: ['sega'], from: 'manual' });
+  assert.ok(!ids(validate(picked)).includes('targets-none'));
+  const cleared = { ...fromReadme, targets: [] };
+  assert.deepEqual(resolveTargets(cleared), { ids: [], from: 'manual' }, 'turning every console off overrides the readme');
 });
 
-test('limited targets are written to the readme for the Mod Hub', async () => {
+test('every selected console is written to the readme for the Mod Hub', async () => {
   const m = await mod({ 'readme.md': FULL_README, 'usr/share/x': 'x' });
   assert.match(readmeText({ ...m, targets: ['nes', 'snes'] }), /^Consoles: NES, SNES$/m);
-  assert.doesNotMatch(readmeText(m), /Consoles:/, 'all consoles is the default and is left out');
+  assert.match(readmeText({ ...m, targets: ['nes', 'snes', 'sega'] }), /^Consoles: NES, SNES, SEGA$/m, 'all three are listed too');
+  assert.doesNotMatch(readmeText(m), /Consoles:/, 'none selected writes no line');
 });
 
 test('parts for consoles the package is not set for are flagged', async () => {
@@ -58,11 +64,13 @@ test('parts for consoles the package is not set for are flagged', async () => {
 test('a theme set for a console it has no menu files for is flagged', async () => {
   const m = await mod({ 'readme.md': FULL_README, 'usr/share/ui/snes-usa/resources/a.png': 'x' });
   assert.ok(ids(validate({ ...m, targets: ['nes', 'snes'] })).includes('targets-theme-missing-nes'));
+  assert.ok(!ids(validate(m)).some((id) => id.startsWith('targets-theme-missing') || id.startsWith('targets-stray')), 'nothing selected, nothing to compare');
 });
 
 test('games: stock emulator must exist on the target and open the ROM', async () => {
-  const nes = await game('CLV-H-AAAAA', '/bin/clover-kachikachi-wr /var/games/CLV-H-AAAAA/x.nes');
-  assert.deepEqual(resolveTargets(nes).ids, ['nes']);
+  const found = await game('CLV-H-AAAAA', '/bin/clover-kachikachi-wr /var/games/CLV-H-AAAAA/x.nes');
+  assert.deepEqual(detectTargets(found).ids, ['nes']);
+  const nes = { ...found, targets: ['nes'] };
   assert.ok(!validate(nes).some((i) => i.severity === 'error'));
 
   const wrongRom = await game('CLV-H-BBBBB', '/bin/clover-kachikachi-wr /var/games/CLV-H-BBBBB/sonic.bin');

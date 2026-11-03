@@ -1,7 +1,7 @@
 import { buildTar, gzip, textBytes } from './tar.js';
 import { serializeReadme } from './readme.js';
 import { fileMode, CONTROL_FILES, cleanName } from './rules.js';
-import { resolveTargets, formatConsolesField, TARGET_IDS } from './targets.js';
+import { resolveTargets, formatConsolesField } from './targets.js';
 import { writeZip, write7z, FORMATS } from './archive.js';
 import { isUnchanged } from './model.js';
 
@@ -18,8 +18,9 @@ export function readmeText(mod) {
   const front = { ...mod.readme.front };
   if (!front.Name) front.Name = mod.name;
   // Record the consoles in the readme so the Mod Hub shows them (CE lists extra fields).
+  // Every selected console is listed, all three included.
   const { ids } = resolveTargets(mod);
-  if (ids.length && ids.length < TARGET_IDS.length) front.Consoles = formatConsolesField(ids);
+  if (ids.length) front.Consoles = formatConsolesField(ids);
   else delete front.Consoles;
   return serializeReadme({ ...mod.readme, front });
 }

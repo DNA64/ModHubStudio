@@ -81,9 +81,11 @@ Each package targets NES, SNES, SEGA or a mix. The consoles come from Hakchi2 CE
 | SNES | SNES Classic (USA, EUR), Super Famicom Mini | `clover-canoe-shvc` (.sfrom, .sfc, .smc) | `usr/share/ui/snes-usa`, `snes-eur`, `shvc` |
 | SEGA | Mega Drive / Genesis Mini (USA, EUR, JPN, Asia) | `m2engage` (.bin) | none known |
 
-The targets are decided in this order: the Consoles buttons on the package, then a `Consoles:` line in the readme, then the contents (UI folders used, stock emulators called), and otherwise all consoles. When a package is limited to some consoles, `Consoles:` is written into its readme so the Mod Hub shows it.
+No console is selected until you pick one: turn each on or off with the Consoles buttons on the package. A `Consoles:` line already in the readme preselects those. When the contents point at particular consoles (UI folders used, stock emulators called), that's shown next to the buttons with a one-click **Use them**, but nothing is selected for you. Every selected console is written into the readme's `Consoles:` line, all three included, so the Mod Hub shows it. At least one is needed before a package can be marked Ready to publish.
 
 Checks against the targets:
+
+- No console selected yet.
 
 - Files or scripts that only work on a console the package isn't set for (for example `clover-ui` files in a SNES-only theme).
 - Themes set for a console they have no menu files for, and themes covering only some regions of a console family.
@@ -104,7 +106,7 @@ Everything here is on the **Publish** tab. Connect your GitHub account once at t
 
 ### Ready to publish
 
-Every package has a **Ready to publish** checkbox at the top of its Readme tab. It can only be ticked once **Name, Creator, Category and Version** are filled in, and clearing one of them unticks it. The other fields (Maintainer, Emulated System, Prerequisite, Command Line, Tags) show a warning there when empty, but don't block anything.
+Every package has a **Ready to publish** checkbox at the top of its Readme tab. It can only be ticked once **Name, Creator, Category and Version** are filled in and **at least one console** is selected, and clearing one of them unticks it. The other fields (Maintainer, Emulated System, Prerequisite, Command Line, Tags) show a warning there when empty, but don't block anything.
 
 - **A whole repository** (GitHub Pages or your own host) won't publish until every package is ticked. The Publish tab lists the ones that aren't, with what each is missing, and **Confirm all complete readmes** ticks every package that already has the four required fields, so only the rest need opening.
 - **A single package** sent to a central repository can't be checked or submitted until it's ticked.

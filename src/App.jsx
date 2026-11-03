@@ -1,5 +1,5 @@
 import { modFromArchive, modFromFolder, modsFromPackageFolder, looksLikePackageFolder, setKind, renameFile, totalSize, KINDS, ACCEPTED_EXTENSIONS, isUnchanged, formatLabel } from './model.js';
-import { TARGETS, TARGET_IDS, resolveTargets, detectTargets } from './targets.js';
+import { TARGETS, TARGET_IDS, resolveTargets, detectTargets, consolesLabel } from './targets.js';
 import { validate, applyFix, applyAllFixes, applyFixes, AUTO_FIX_IDS, destination, fileMode, cleanName, OVERLAY_ROOTS, CONTROL_FILES, skipsDefaultCopy } from './rules.js';
 import { packPackage, hmodFileName, readmeText, serverFileName, keepsOriginal } from './pack.js';
 import { buildRepoFiles, buildRepoZip, repoIssues, modLink, normalizeBase, packagePlacement, siteFolders, defaultFolder, staleFiles } from './repo.js';
@@ -405,6 +405,15 @@ const PLACEHOLDERS = {
   Tags: 'optional',
 };
 
+// "Name, Version and a console" from missingRequired's list.
+function missingText(missing) {
+  const fields = missing.filter((k) => k !== 'Consoles');
+  const parts = [];
+  if (fields.length) parts.push(`fill in ${fields.join(', ')}`);
+  if (missing.includes('Consoles')) parts.push('select at least one console');
+  return parts.join(' and ');
+}
+
 function ReadyToPublish({ mod, update }) {
   const missing = missingRequired(mod);
   const optional = missingOptional(mod);
@@ -416,7 +425,7 @@ function ReadyToPublish({ mod, update }) {
           onChange={(e) => update(setReady(mod, e.target.checked))} />
         <span><strong>Ready to publish</strong>{published && <span className="muted small"> · already published unchanged</span>}</span>
       </label>
-      {!published && missing.length > 0 && <p className="callout callout-error small">Fill in {missing.join(', ')} before this package can be published.</p>}
+      {!published && missing.length > 0 && <p className="callout callout-error small">{missingText(missing).replace(/^./, (c) => c.toUpperCase())} before this package can be published.</p>}
       {!published && !missing.length && !isReady(mod) && <p className="muted small">Check the readme, then tick this. It can't be published until it's ticked.</p>}
       {optional.length > 0 && <p className="callout callout-warning small">Not filled in: {optional.join(', ')}. Fill in any that apply to this package.</p>}
     </div>
@@ -624,16 +633,14 @@ function PackageTab({ mod, issues, notify, goPublish }) {
 function ConsolePicker({ mod, update }) {
   const { ids, from } = resolveTargets(mod);
   const detected = useMemo(() => detectTargets(mod), [mod]);
+  // Each console turns on and off on its own; none are on until picked.
   const toggle = (t) => {
     const next = ids.includes(t) ? ids.filter((x) => x !== t) : [...ids, t];
-    if (!next.length) return;
-    update({ ...mod, targets: TARGET_IDS.filter((x) => next.includes(x)) });
+    // Turning the last one off unticks Ready to publish.
+    update({ ...mod, targets: TARGET_IDS.filter((x) => next.includes(x)), ...(next.length ? {} : { ready: false }) });
   };
-  const caption = {
-    readme: 'From the readme\'s Consoles field',
-    contents: `Detected: ${[...new Set(detected.evidence.map((e) => e.reason))].slice(0, 2).join('; ')}`,
-    none: 'Nothing console-specific found, so all consoles',
-  }[from];
+  const suggest = detected.ids.length && detected.ids.join() !== ids.join();
+  const caption = from === 'readme' ? 'From the readme\'s Consoles field' : !ids.length ? 'Select the consoles it works on' : '';
   return (
     <div className="kind-row">
       <span className="eyebrow">Consoles</span>
@@ -644,6 +651,12 @@ function ConsolePicker({ mod, update }) {
         ))}
       </div>
       {caption && <span className="muted small">{caption}</span>}
+      {suggest ? (
+        <span className="muted small">
+          Its contents point at {detected.ids.map((t) => TARGETS[t].label).join(', ')} ({[...new Set(detected.evidence.map((e) => e.reason))].slice(0, 2).join('; ')}).{' '}
+          <button className="linkish small" onClick={() => update({ ...mod, targets: [...detected.ids] })}>Use {detected.ids.length === 1 ? 'it' : 'them'}</button>
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -938,7 +951,6 @@ function useRepoBasics(repo, mods) {
   return { base, effective, problems, modIssues, hosting: repo.hosting || 'own' };
 }
 
-const consolesLabel = (m) => { const t = resolveTargets(m).ids; return t.length === TARGET_IDS.length ? 'All' : t.map((x) => TARGETS[x].label).join(', '); };
 
 function LinkCell({ repo, effective, base, mod: m, updateMod, folders }) {
   const place = packagePlacement(effective, m);
@@ -1056,7 +1068,7 @@ function NotReadyList({ mods, open, confirmAll }) {
           return (
             <li key={m.id}>
               <button className="linkish small" onClick={() => open(m.id, 'readme')}>{m.readme.front.Name || m.name}</button>
-              <span className="small"> · {missing.length ? `missing ${missing.join(', ')}` : 'readme complete, not ticked yet'}</span>
+              <span className="small"> · {missing.length ? `needs to ${missingText(missing)}` : 'complete, not ticked yet'}</span>
             </li>
           );
         })}
@@ -1064,7 +1076,7 @@ function NotReadyList({ mods, open, confirmAll }) {
       {complete > 0 && (
         <div className="row">
           <button className="btn btn-small" onClick={confirmAll}>Confirm all complete readmes</button>
-          <span className="small">Ticks the {complete === 1 ? 'package' : `${complete} packages`} with Name, Creator, Category and Version filled in{complete < notReady.length ? '; the rest still need those fields' : ''}.</span>
+          <span className="small">Ticks the {complete === 1 ? 'package' : `${complete} packages`} with Name, Creator, Category, Version and a console filled in{complete < notReady.length ? '; the rest still need theirs' : ''}.</span>
         </div>
       )}
     </div>

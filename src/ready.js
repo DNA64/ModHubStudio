@@ -1,12 +1,17 @@
 // "Ready to publish": the author confirms a package's readme on its Readme tab
 // before it can be published. Name, Creator, Category and Version must be filled
-// in first; the other standard fields only get a warning.
+// in, and at least one console selected; the other standard fields only get a warning.
 import { REQUIRED_FIELDS, STANDARD_FIELDS } from './readme.js';
+import { resolveTargets } from './targets.js';
 import { keepsOriginal, hmodFileName } from './pack.js';
 
 const filled = (mod, k) => !!String(mod.readme.front[k] || '').trim();
 
-export const missingRequired = (mod) => REQUIRED_FIELDS.filter((k) => !filled(mod, k));
+// What still has to be filled in: the four readme fields, and at least one console.
+export const missingRequired = (mod) => [
+  ...REQUIRED_FIELDS.filter((k) => !filled(mod, k)),
+  ...(resolveTargets(mod).ids.length ? [] : ['Consoles']),
+];
 export const missingOptional = (mod) => STANDARD_FIELDS.filter((k) => !REQUIRED_FIELDS.includes(k) && !filled(mod, k));
 
 // A package opened from an existing repository and left unchanged is published

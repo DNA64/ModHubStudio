@@ -86,14 +86,22 @@ export function detectTargets(mod) {
   return { ids: TARGET_IDS.filter((t) => evidence.some((e) => e.target === t)), evidence };
 }
 
-// Settled targets for a package: chosen by hand, then readme, then contents, else all.
+// The consoles a package is for: chosen by hand (mod.targets, which may be
+// empty), else the readme's Consoles field, else none. Nothing is selected
+// until the author picks; what the contents point at is only a suggestion
+// (detectTargets).
 export function resolveTargets(mod) {
-  if (mod.targets && mod.targets.length) return { ids: mod.targets, from: 'manual' };
+  if (Array.isArray(mod.targets)) return { ids: TARGET_IDS.filter((t) => mod.targets.includes(t)), from: 'manual' };
   const fromReadme = parseConsolesField(mod.readme?.front?.Consoles);
   if (fromReadme) return { ids: fromReadme, from: 'readme' };
-  const detected = detectTargets(mod);
-  if (detected.ids.length) return { ids: detected.ids, from: 'contents' };
-  return { ids: [...TARGET_IDS], from: 'none' };
+  return { ids: [], from: 'none' };
+}
+
+// How a package's consoles read in a listing.
+export function consolesLabel(mod) {
+  const { ids } = resolveTargets(mod);
+  if (!ids.length) return 'Not set';
+  return ids.length === TARGET_IDS.length ? 'All' : listOf(ids);
 }
 
 function elfMachine(u8) {
@@ -117,13 +125,13 @@ export function validateTargets(mod, add) {
     `Every supported console runs 32-bit ARM Linux. These are ${[...new Set(wrongArch.map((f) => ELF_NAMES[elfMachine(f.data)] || `machine ${elfMachine(f.data)}`))].join(', ')} binaries and fail with "not found" or "exec format error".`,
     wrongArch.map((f) => f.path));
 
-  if (from === 'none' && mod.kind !== 'game') {
-    add('targets-unknown', 'info', 'Not tied to a console',
-      'Nothing in the package points at NES, SNES or SEGA, so it is treated as working on all of them. If it only suits some, set them under Consoles; that is written to the readme so the Mod Hub shows it.');
+  if (!ids.length) {
+    add('targets-none', 'warning', 'No consoles selected',
+      `Select the consoles it works on under Consoles, above. They're written to the readme so the Mod Hub shows them, and at least one is needed before it can be published.${detected.ids.length ? ` Its contents point at ${listOf(detected.ids)} (${[...new Set(detected.evidence.map((e) => e.reason))].slice(0, 2).join('; ')}).` : ''}`);
   }
 
   // Detected evidence for consoles outside the chosen targets.
-  if (from !== 'contents') {
+  if (ids.length) {
     for (const t of others) {
       const ev = detected.evidence.filter((e) => e.target === t);
       if (!ev.length) continue;

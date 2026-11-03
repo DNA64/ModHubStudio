@@ -5,7 +5,7 @@
 //   <base>/.repo/<mod>.hmod/link     absolute URL of the .hmod (used by `hmod rinstall`)
 import { buildTar, gzip, textBytes } from './tar.js';
 import { hmodFileName, readmeText, serverFileName, keepsOriginal } from './pack.js';
-import { resolveTargets, TARGET_IDS, TARGETS } from './targets.js';
+import { consolesLabel } from './targets.js';
 import { STUDIO_URL } from './project.js';
 
 export function normalizeBase(url) {
@@ -261,8 +261,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 function indexHtml(repo, mods, base) {
   const rows = mods.map((m) => {
     const f = m.readme.front;
-    const t = resolveTargets(m).ids;
-    const consoles = t.length === TARGET_IDS.length ? 'All' : t.map((x) => TARGETS[x].label).join(', ');
+    const consoles = consolesLabel(m);
     return `<tr><td><a href="${esc(modLink(repo, m))}">${esc(f.Name || m.name)}</a></td><td>${esc(f.Version || '')}</td><td>${esc(consoles)}</td><td>${esc(f.Creator || '')}</td><td>${esc(f.Category || '')}</td></tr>`;
   }).join('\n');
   return `<!doctype html>
