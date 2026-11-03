@@ -1,6 +1,6 @@
 import { modFromArchive, modFromFolder, modsFromPackageFolder, looksLikePackageFolder, setKind, renameFile, totalSize, KINDS, ACCEPTED_EXTENSIONS, isUnchanged, formatLabel } from './model.js';
 import { TARGETS, TARGET_IDS, resolveTargets, detectTargets } from './targets.js';
-import { validate, applyFix, applyAllFixes, AUTO_FIX_IDS, destination, fileMode, cleanName, OVERLAY_ROOTS, CONTROL_FILES, skipsDefaultCopy } from './rules.js';
+import { validate, applyFix, applyAllFixes, applyFixes, AUTO_FIX_IDS, destination, fileMode, cleanName, OVERLAY_ROOTS, CONTROL_FILES, skipsDefaultCopy } from './rules.js';
 import { packPackage, hmodFileName, readmeText, serverFileName, keepsOriginal } from './pack.js';
 import { buildRepoFiles, buildRepoZip, repoIssues, modLink, normalizeBase, packagePlacement, siteFolders, defaultFolder, staleFiles } from './repo.js';
 import { importRepository, readRepositoryIndex, siteFromFiles, siteFromAddress, addressForCopy, attachFile } from './import.js';
@@ -219,20 +219,28 @@ function ChangeList({ changes }) {
 function ChecksTab({ mod, issues, update }) {
   const fixable = issues.filter((i) => i.fixLabel && AUTO_FIX_IDS.includes(i.id));
   const sorted = [...issues].sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
-  // preview: what Apply all would do, shown before anything changes.
+  // preview: the fixes on offer, each with a checkbox; nothing changes until Apply.
   const [preview, setPreview] = useState(null);
   // done: what the last fix changed, with Undo.
   const [done, setDone] = useState(null);
   const showPreview = () => {
-    const after = applyAllFixes(mod);
+    const all = applyFixes(mod);
     setDone(null);
-    setPreview({ after, fixes: fixable, changes: describeChanges(mod, after) });
+    setPreview({ fixes: all.applied, chosen: new Set(all.applied.map((f) => f.id)) });
   };
+  const result = useMemo(() => (preview ? applyFixes(mod, preview.chosen) : null), [preview, mod]);
+  const changes = useMemo(() => (result ? describeChanges(mod, result.mod) : []), [result, mod]);
+  const toggle = (id) => setPreview((p) => {
+    const chosen = new Set(p.chosen);
+    if (chosen.has(id)) chosen.delete(id); else chosen.add(id);
+    return { ...p, chosen };
+  });
   const apply = (after, label) => {
     setDone({ before: mod, label, changes: describeChanges(mod, after) });
     setPreview(null);
     update(after);
   };
+  const count = preview ? preview.fixes.filter((f) => preview.chosen.has(f.id)).length : 0;
   return (
     <div className="stack">
       <div className="summary-bar">
@@ -246,17 +254,35 @@ function ChecksTab({ mod, issues, update }) {
       </div>
       {preview && (
         <div className="panel stack fix-panel">
-          <h3>{preview.fixes.length === 1 ? 'This fix' : `These ${preview.fixes.length} fixes`} will be applied</h3>
+          <h3>Choose the fixes to apply</h3>
           <ul className="fix-list">
-            {preview.fixes.map((f) => (
-              <li key={f.id}><strong>{f.fixLabel}</strong> <span className="muted small">for “{f.title}”</span><br /><span className="small">{FIX_DESCRIPTIONS[f.id] || f.detail}</span></li>
-            ))}
+            {preview.fixes.map((f) => {
+              const skipped = preview.chosen.has(f.id) && result && !result.applied.some((a) => a.id === f.id);
+              return (
+                <li key={f.id}>
+                  <label className="fix-choice">
+                    <input type="checkbox" checked={preview.chosen.has(f.id)} onChange={() => toggle(f.id)} />
+                    <span>
+                      <strong>{f.fixLabel}</strong> <span className="muted small">for “{f.title}”</span><br />
+                      <span className="small">{FIX_DESCRIPTIONS[f.id] || ''}</span>
+                      {skipped && <><br /><span className="small fix-note">Not needed with the fixes chosen above, so it won't run.</span></>}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
           </ul>
-          <span className="eyebrow">What changes in the package</span>
-          <ChangeList changes={preview.changes} />
-          <p className="muted small">Nothing is changed on your computer: the fixes apply to the copy here, and you can undo them afterwards.</p>
           <div className="row">
-            <button className="btn btn-primary" onClick={() => apply(preview.after, `${preview.fixes.length} automatic fix${preview.fixes.length === 1 ? '' : 'es'}`)}>Apply {preview.fixes.length === 1 ? 'it' : 'them'}</button>
+            <button className="linkish small" onClick={() => setPreview((p) => ({ ...p, chosen: new Set(p.fixes.map((f) => f.id)) }))}>Select all</button>
+            <button className="linkish small" onClick={() => setPreview((p) => ({ ...p, chosen: new Set() }))}>Select none</button>
+          </div>
+          <span className="eyebrow">What changes in the package</span>
+          {count ? <ChangeList changes={changes} /> : <p className="small">No fixes chosen.</p>}
+          <p className="muted small">Fixes change only the copy here, never your original file, and can be undone afterwards.</p>
+          <div className="row">
+            <button className="btn btn-primary" disabled={!count} onClick={() => apply(result.mod, `${count} automatic fix${count === 1 ? '' : 'es'}`)}>
+              {count ? `Apply ${count} fix${count === 1 ? '' : 'es'}` : 'Apply'}
+            </button>
             <button className="btn btn-quiet" onClick={() => setPreview(null)}>Cancel</button>
           </div>
         </div>

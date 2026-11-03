@@ -317,3 +317,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .change-list li { overflow-wrap: anywhere; }
 .change-list summary { cursor: pointer; }
 .fix-what { flex: 1 1 16rem; }
+.fix-list { list-style: none; padding-left: 0; }
+.fix-choice { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.fix-choice input { margin-top: 4px; width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.fix-note { color: var(--warn); }

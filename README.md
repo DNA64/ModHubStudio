@@ -192,7 +192,7 @@ The rules come from hakchi's source code, not from convention:
 
 ### Automatic fixes
 
-Findings with a safe fix have a button that applies it, with a line saying what it changes. **Review automatic fixes** at the top of the Checks tab lists every fix it would apply and exactly what changes in the package (files moved, removed, edited or made executable, and renames) before anything is changed. After any fix, the same list of changes is shown with **Undo**. Fixes only change the copy in the Studio, never the original file.
+Findings with a safe fix have a button that applies it, with a line saying what it changes. **Review automatic fixes** at the top of the Checks tab lists every fix with a checkbox, all ticked to start, and exactly what changes in the package (files moved, removed, edited or made executable, and renames). Untick any you don't want and the list of changes updates; only the ticked fixes are applied, in the safe order. After any fix, the same list of changes is shown with **Undo**. Fixes only change the copy in the Studio, never the original file.
 
 ### .clvg games
 

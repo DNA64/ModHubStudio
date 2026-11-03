@@ -38,3 +38,26 @@ test('line ending changes are named', async () => {
   const texts = describeChanges(mod, applyAllFixes(mod)).map((c) => c.text);
   assert.ok(texts.includes('usr/bin/tool: Windows line endings converted to Unix'), texts.join('\n'));
 });
+
+test('only the chosen fixes are applied, in the safe order', async () => {
+  const { applyFixes } = await import('../src/rules.js');
+  const mod = await modFromArchive('Night Sky.hmod', await zip({
+    'NightSky/readme.md': FULL_README,
+    'NightSky/Etc/preinit.d/p8100_sky': 'echo sky',
+    'NightSky/.DS_Store': 'junk',
+  }));
+  const all = applyFixes(mod);
+  const ids = all.applied.map((f) => f.id);
+  assert.ok(ids.includes('junk') && ids.includes('wrapper') && ids.includes('root-case'), ids.join(','));
+  assert.ok(all.applied.every((f) => f.fixLabel && f.title));
+
+  const some = applyFixes(mod, new Set(ids.filter((id) => id !== 'junk' && id !== 'bad-name')));
+  const paths = some.mod.files.map((f) => f.path);
+  assert.ok(paths.includes('.DS_Store'), 'junk kept when its fix is unticked');
+  assert.ok(paths.includes('etc/preinit.d/p8100_sky'), 'the rest still ran');
+  assert.equal(some.mod.name, 'Night Sky', 'not renamed');
+  assert.ok(!some.applied.some((f) => f.id === 'junk'));
+
+  assert.deepEqual(applyFixes(mod, new Set()).applied, []);
+  assert.equal(applyFixes(mod, new Set()).mod, mod);
+});

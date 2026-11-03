@@ -461,14 +461,28 @@ export function applyFix(mod, id) {
 export const AUTO_FIX_IDS = ['backslash-paths', 'junk', 'wrapper', 'rootfs-prefix', 'root-case', 'nested-hmod', 'preinit-newline', 'crlf-exec', 'exec-bit', 'install-return', 'readme-top', 'bad-name'];
 
 export function applyAllFixes(mod) {
+  return applyFixes(mod).mod;
+}
+
+// Applies the automatic fixes, or only those in `only` (a Set of ids), always
+// in the safe order. A second pass picks up findings an earlier fix uncovered
+// (a wrapped package's Etc/ only shows up once the wrapper is gone).
+// Returns { mod, applied: [{ id, title, fixLabel }] } in the order they ran.
+export function applyFixes(mod, only = null) {
   let next = mod;
+  const applied = [];
+  const seen = new Set();
   // Order matters: separators, junk, wrapper, prefix, case, then file contents.
-  const order = AUTO_FIX_IDS;
   for (let pass = 0; pass < 2; pass++) {
-    const ids = new Set(validate(next).map((i) => i.id));
-    for (const id of order) if (ids.has(id)) next = applyFix(next, id);
+    const found = new Map(validate(next).map((i) => [i.id, i]));
+    for (const id of AUTO_FIX_IDS) {
+      const issue = found.get(id);
+      if (!issue || (only && !only.has(id))) continue;
+      next = applyFix(next, id);
+      if (!seen.has(id)) { seen.add(id); applied.push({ id, title: issue.title, fixLabel: issue.fixLabel }); }
+    }
   }
-  return next;
+  return { mod: next, applied };
 }
 
 // Where a package path ends up on the console.
