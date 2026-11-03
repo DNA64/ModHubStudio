@@ -3,8 +3,12 @@ const FRONT_RE = /^(?:-{3,}[\r\n]+([\s\S]*?)[\r\n]*-{3,})?[\r\n\t\s]*([\s\S]*)[\
 const FIELD_RE = /^[ \t]*([^:\r\n]+?)[ \t]*:[ \t]*(.*?)[ \t]*$/gm;
 
 export const STANDARD_FIELDS = ['Name', 'Creator', 'Maintainer', 'Category', 'Version', 'Emulated System', 'Prerequisite', 'Command Line', 'Tags'];
+// The readme field the selected consoles are written to. "Consoles" is the name
+// earlier versions of the Studio wrote; it's still read, and replaced on save.
+export const SYSTEMS_FIELD = 'Compatible System(s)';
+export const OLD_SYSTEMS_FIELDS = ['Consoles'];
 // Written by this tool from the Consoles setting; not edited as free text.
-export const MANAGED_FIELDS = ['Consoles'];
+export const MANAGED_FIELDS = [SYSTEMS_FIELD, ...OLD_SYSTEMS_FIELDS];
 export const REQUIRED_FIELDS = ['Name', 'Creator', 'Category', 'Version'];
 export const CATEGORIES = ['UI', 'Theme', 'Music', 'Emulator', 'Core', 'Games', 'Tweak', 'Utility', 'Font', 'Module'];
 

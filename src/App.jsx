@@ -640,7 +640,7 @@ function ConsolePicker({ mod, update }) {
     update({ ...mod, targets: TARGET_IDS.filter((x) => next.includes(x)), ...(next.length ? {} : { ready: false }) });
   };
   const suggest = detected.ids.length && detected.ids.join() !== ids.join();
-  const caption = from === 'readme' ? 'From the readme\'s Consoles field' : !ids.length ? 'Select the consoles it works on' : '';
+  const caption = from === 'readme' ? 'From the readme\'s Compatible System(s) field' : !ids.length ? 'Select the consoles it works on' : '';
   return (
     <div className="kind-row">
       <span className="eyebrow">Consoles</span>

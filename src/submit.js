@@ -1,5 +1,6 @@
 // Submit one package to a central repository by pull request.
 import { packHmod, hmodFileName } from './pack.js';
+import { resolveTargets, formatConsolesField } from './targets.js';
 import { textBytes } from './tar.js';
 import { STUDIO_URL } from './project.js';
 import { checkSubmission, packagePath, metaPath, parseMeta, metaText, parseNamespaces, names, DEFAULT_MAX_MB, NAMESPACES_FILE, PACKAGES_DIR } from './central.js';
@@ -139,7 +140,7 @@ export async function submitToCentral(gh, { central, mod, prepared = null, onPro
       '',
       `- Kind: ${mod.kind === 'game' ? 'game (.clvg)' : 'mod (.hmod)'}`,
       mod.readme.front.Creator ? `- Creator: ${mod.readme.front.Creator}` : null,
-      mod.readme.front.Consoles ? `- Consoles: ${mod.readme.front.Consoles}` : null,
+      resolveTargets(mod).ids.length ? `- Compatible system(s): ${formatConsolesField(resolveTargets(mod).ids)}` : null,
       `- Maintainers: ${names(p.meta.maintainers)}`,
       '',
       `Submitted with [Mod Hub Studio](${STUDIO_URL}). The repository's checks run again on this pull request.`,

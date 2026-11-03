@@ -17,7 +17,7 @@ test('Name, Creator, Category and Version are required', async () => {
   assert.match(issue.title, /Creator, Category/);
   const full = await mod({ Name: 'X', Creator: 'me', Category: 'Tweak', Version: '1' });
   assert.ok(!ids(validate(full)).includes('readme-fields'));
-  assert.deepEqual(missingOptional(full), ['Maintainer', 'Emulated System', 'Prerequisite', 'Command Line', 'Tags']);
+  assert.deepEqual(missingOptional(full), ['Maintainer', 'Prerequisite', 'Tags'], 'a plain mod with nothing to run');
 });
 
 test('a game missing them is warned, not failed (a central repository keeps no listing for games)', async () => {
@@ -63,4 +63,18 @@ test('at least one console must be selected before it is ready', async () => {
   assert.deepEqual(missingRequired(none), ['Consoles']);
   assert.equal(isReady(setReady(none, true)), false);
   assert.equal(isReady(setReady(full, true)), true);
+});
+
+test('Emulated System and Command Line are only asked for where they apply', async () => {
+  const { missingOptional } = await import('../src/ready.js');
+  const { elf, ELF_ARM, desktop: dsk } = await import('./helpers.js');
+  const base = { Name: 'X', Creator: 'me', Version: '1' };
+  const theme = await modFromArchive('t.hmod', await tgz({ 'readme.md': readme({ ...base, Category: 'Theme' }), 'usr/share/ui/snes-usa/a.png': 'x', 'etc/preinit.d/p8100_t': 'echo\n', install: 'return 0\n' }));
+  assert.deepEqual(missingOptional(theme), ['Maintainer', 'Prerequisite', 'Tags']);
+  const core = await modFromArchive('c.hmod', await tgz({ 'readme.md': readme({ ...base, Category: 'RetroArch Cores' }), 'etc/libretro/core/x.so': elf(ELF_ARM) }));
+  assert.ok(missingOptional(core).includes('Emulated System') && missingOptional(core).includes('Command Line'));
+  const tool = await modFromArchive('u.hmod', await tgz({ 'readme.md': readme({ ...base, Category: 'Utility' }), 'usr/bin/tool': '#!/bin/sh\n' }));
+  assert.ok(missingOptional(tool).includes('Command Line') && !missingOptional(tool).includes('Emulated System'));
+  const g = await modFromArchive('CLV-Z-ABCDE.clvg', await zip({ 'CLV-Z-ABCDE.desktop': dsk('CLV-Z-ABCDE', '/bin/x') }));
+  assert.ok(missingOptional(g).includes('Command Line'));
 });

@@ -1,5 +1,5 @@
 import { buildTar, gzip, textBytes } from './tar.js';
-import { serializeReadme } from './readme.js';
+import { serializeReadme, MANAGED_FIELDS, SYSTEMS_FIELD } from './readme.js';
 import { fileMode, CONTROL_FILES, cleanName } from './rules.js';
 import { resolveTargets, formatConsolesField } from './targets.js';
 import { writeZip, write7z, FORMATS } from './archive.js';
@@ -20,9 +20,15 @@ export function readmeText(mod) {
   // Record the consoles in the readme so the Mod Hub shows them (CE lists extra fields).
   // Every selected console is listed, all three included.
   const { ids } = resolveTargets(mod);
-  if (ids.length) front.Consoles = formatConsolesField(ids);
-  else delete front.Consoles;
-  return serializeReadme({ ...mod.readme, front });
+  const at = (mod.readme.order || []).findIndex((k) => MANAGED_FIELDS.includes(k));
+  for (const k of MANAGED_FIELDS) delete front[k];
+  let order = (mod.readme.order || []).filter((k) => !MANAGED_FIELDS.includes(k));
+  if (ids.length) {
+    front[SYSTEMS_FIELD] = formatConsolesField(ids);
+    // Keep it where the old field was, if there was one.
+    order = at >= 0 ? [...order.slice(0, at), SYSTEMS_FIELD, ...order.slice(at)] : order;
+  }
+  return serializeReadme({ ...mod.readme, front, order });
 }
 
 // Entries in the order a person would read them: control scripts, readme, then the tree.

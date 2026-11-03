@@ -12,7 +12,36 @@ export const missingRequired = (mod) => [
   ...REQUIRED_FIELDS.filter((k) => !filled(mod, k)),
   ...(resolveTargets(mod).ids.length ? [] : ['Consoles']),
 ];
-export const missingOptional = (mod) => STANDARD_FIELDS.filter((k) => !REQUIRED_FIELDS.includes(k) && !filled(mod, k));
+// Emulator and core packages: their Category says so.
+export const isEmulatorOrCore = (mod) => /\b(emulators?|cores?)\b/i.test(String(mod.readme.front.Category || ''));
+
+const EXEC_DIRS = ['bin/', 'sbin/', 'usr/bin/', 'usr/sbin/'];
+const isElf = (u8) => u8.length > 4 && u8[0] === 0x7f && u8[1] === 0x45 && u8[2] === 0x4c && u8[3] === 0x46;
+const hasShebang = (u8) => u8.length > 2 && u8[0] === 0x23 && u8[1] === 0x21;
+// Something a user runs: a program, or a script in a bin folder or marked
+// executable. install/uninstall/transfer and boot scripts don't count.
+export function hasExecutable(mod) {
+  return mod.files.some((f) => {
+    if (f.type !== 'file' || ['install', 'uninstall', 'transfer'].includes(f.path) || f.path.startsWith('etc/preinit.d/')) return false;
+    if (isElf(f.data)) return true;
+    if (EXEC_DIRS.some((d) => f.path.startsWith(d))) return true;
+    return hasShebang(f.data) && f.mode != null && (f.mode & 0o111) !== 0;
+  });
+}
+
+// Optional fields worth asking about for this package. Emulated System is only
+// for emulators and cores; Command Line also for games and anything that runs a
+// program. Themes, UI mods and the like aren't asked for either.
+export function relevantOptional(mod) {
+  const emu = isEmulatorOrCore(mod);
+  return STANDARD_FIELDS.filter((k) => !REQUIRED_FIELDS.includes(k)).filter((k) => {
+    if (k === 'Emulated System') return emu;
+    if (k === 'Command Line') return emu || mod.kind === 'game' || hasExecutable(mod);
+    return true;
+  });
+}
+
+export const missingOptional = (mod) => relevantOptional(mod).filter((k) => !filled(mod, k));
 
 // A package opened from an existing repository and left unchanged is published
 // exactly as it already was, so it doesn't need confirming again. Neither does

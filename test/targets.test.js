@@ -45,9 +45,16 @@ test('targets come from the buttons, then the readme; nothing is selected by def
 
 test('every selected console is written to the readme for the Mod Hub', async () => {
   const m = await mod({ 'readme.md': FULL_README, 'usr/share/x': 'x' });
-  assert.match(readmeText({ ...m, targets: ['nes', 'snes'] }), /^Consoles: NES, SNES$/m);
-  assert.match(readmeText({ ...m, targets: ['nes', 'snes', 'sega'] }), /^Consoles: NES, SNES, SEGA$/m, 'all three are listed too');
-  assert.doesNotMatch(readmeText(m), /Consoles:/, 'none selected writes no line');
+  assert.match(readmeText({ ...m, targets: ['nes', 'snes'] }), /^Compatible System\(s\): NES, SNES$/m);
+  assert.match(readmeText({ ...m, targets: ['nes', 'snes', 'sega'] }), /^Compatible System\(s\): NES, SNES, SEGA$/m, 'all three are listed too');
+  assert.doesNotMatch(readmeText(m), /Compatible System|Consoles:/, 'none selected writes no line');
+  // A readme written with the old field name is read, and written back under the new one.
+  const old = await mod({ 'readme.md': readme({ Name: 'x', Consoles: 'SNES', Version: '1' }), 'usr/share/x': 'x' });
+  assert.deepEqual(resolveTargets(old).ids, ['snes']);
+  const text = readmeText(old);
+  assert.match(text, /^Compatible System\(s\): SNES$/m);
+  assert.doesNotMatch(text, /^Consoles:/m);
+  assert.deepEqual(resolveTargets(await mod({ 'readme.md': readme({ Name: 'x', 'Compatible System(s)': 'NES, SEGA' }) })).ids, ['nes', 'sega']);
 });
 
 test('parts for consoles the package is not set for are flagged', async () => {

@@ -1,6 +1,7 @@
 // Console targets, from hakchi2-CE hakchi.cs (ConsoleType, IsNes/IsSnes),
 // Apps/BuiltInCores.cs (stock emulators) and hakchi's fontfix (UI folders).
 import { bytesText } from './tar.js';
+import { SYSTEMS_FIELD, OLD_SYSTEMS_FIELDS } from './readme.js';
 
 export const TARGETS = {
   nes: {
@@ -87,12 +88,13 @@ export function detectTargets(mod) {
 }
 
 // The consoles a package is for: chosen by hand (mod.targets, which may be
-// empty), else the readme's Consoles field, else none. Nothing is selected
+// empty), else the readme's Compatible System(s) field (or the older Consoles), else none. Nothing is selected
 // until the author picks; what the contents point at is only a suggestion
 // (detectTargets).
 export function resolveTargets(mod) {
   if (Array.isArray(mod.targets)) return { ids: TARGET_IDS.filter((t) => mod.targets.includes(t)), from: 'manual' };
-  const fromReadme = parseConsolesField(mod.readme?.front?.Consoles);
+  const front = mod.readme?.front || {};
+  const fromReadme = parseConsolesField([SYSTEMS_FIELD, ...OLD_SYSTEMS_FIELDS].map((k) => front[k]).find(Boolean));
   if (fromReadme) return { ids: fromReadme, from: 'readme' };
   return { ids: [], from: 'none' };
 }
