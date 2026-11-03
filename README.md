@@ -190,6 +190,10 @@ The rules come from hakchi's source code, not from convention:
 | Name isn't a Package ID | Required by the central repository; a warning elsewhere |
 | Front matter not at the very top | CE ignores Name, Creator and Version |
 
+### Automatic fixes
+
+Findings with a safe fix have a button that applies it, with a line saying what it changes. **Review automatic fixes** at the top of the Checks tab lists every fix it would apply and exactly what changes in the package (files moved, removed, edited or made executable, and renames) before anything is changed. After any fix, the same list of changes is shown with **Undo**. Fixes only change the copy in the Studio, never the original file.
+
 ### .clvg games
 
 Hakchi2 CE extracts a `.clvg` and imports the `.desktop` file at its top level (`Tasks/AddGamesTask.cs`). The tool checks for exactly one top-level `.desktop` with `Exec=` and `Name=`, a `CLV-X-XXXXX` code, cover art, and no wrapper folder. Games are published under `games/` in the repository.
@@ -243,6 +247,7 @@ The built page loads React, ReactDOM, JSZip and SparkMD5 from cdnjs, and its fon
 | `src/model.js` | Importing archives and folders, mod/game detection, renaming, unchanged-package tracking |
 | `src/archive.js` | ZIP and 7z reading and writing |
 | `src/import.js` | Opening an existing repository: by address or from a copy of the site |
+| `src/fixes.js` | What each automatic fix does, and the list of changes a fix made |
 | `src/ready.js` | Ready to publish: required readme fields and the confirmation tick |
 | `src/tar.js` | ustar reader and writer, gzip |
 | `src/readme.js` | Front matter parser, same regex as Hakchi2 CE |

@@ -308,3 +308,12 @@ a.btn { text-decoration: none; display: inline-block; }
 .ready-box .callout { margin: 0; }
 .not-ready { margin: 0; padding-left: 1.1rem; max-height: 14rem; overflow-y: auto; }
 .not-ready li { margin: 2px 0; }
+
+/* Automatic fixes: what will change, and what did. */
+.fix-panel { border-color: var(--accent); }
+.fix-list { margin: 0; padding-left: 1.1rem; display: grid; gap: 8px; }
+.change-list { display: grid; gap: 4px; }
+.change-list ul { margin: 4px 0 6px; padding-left: 1.1rem; max-height: 16rem; overflow-y: auto; }
+.change-list li { overflow-wrap: anywhere; }
+.change-list summary { cursor: pointer; }
+.fix-what { flex: 1 1 16rem; }

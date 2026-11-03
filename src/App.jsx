@@ -7,6 +7,7 @@ import { importRepository, readRepositoryIndex, siteFromFiles, siteFromAddress, 
 import { readZip } from './archive.js';
 import { isZip } from './tar.js';
 import { CATEGORIES, STANDARD_FIELDS, MANAGED_FIELDS, REQUIRED_FIELDS } from './readme.js';
+import { FIX_DESCRIPTIONS, describeChanges, CHANGE_LABELS } from './fixes.js';
 import { isReady, setReady, missingRequired, missingOptional, alreadyPublished, confirmComplete } from './ready.js';
 import { exampleMods } from './examples.js';
 import { createClient, parseRepoName } from './github.js';
@@ -186,6 +187,7 @@ function Issue({ issue, onFix, onDismiss }) {
       {(issue.fixLabel || issue.severity !== 'error') && (
         <div className="issue-actions">
           {issue.fixLabel && <button className="btn btn-small btn-primary" onClick={() => onFix(issue.id)}>{issue.fixLabel}</button>}
+          {issue.fixLabel && FIX_DESCRIPTIONS[issue.id] && <span className="muted small fix-what">{FIX_DESCRIPTIONS[issue.id]}</span>}
           {issue.severity !== 'error' && <button className="btn btn-small btn-quiet" onClick={() => onDismiss(issue.id)}>Ignore</button>}
         </div>
       )}
@@ -198,9 +200,39 @@ function renderTicks(text) {
 }
 
 // ---------- mod views ----------
+// A list of changes, grouped by kind, long groups collapsed.
+function ChangeList({ changes }) {
+  const groups = Object.keys(CHANGE_LABELS).map((k) => [k, changes.filter((c) => c.kind === k)]).filter(([, list]) => list.length);
+  if (!groups.length) return <p className="small">No files change.</p>;
+  return (
+    <div className="change-list">
+      {groups.map(([k, list]) => (
+        <details key={k} open={list.length <= 8}>
+          <summary className="small"><strong>{CHANGE_LABELS[k]}</strong> · {list.length}</summary>
+          <ul>{list.map((c, i) => <li key={i} className="mono small">{c.text}</li>)}</ul>
+        </details>
+      ))}
+    </div>
+  );
+}
+
 function ChecksTab({ mod, issues, update }) {
   const fixable = issues.filter((i) => i.fixLabel && AUTO_FIX_IDS.includes(i.id));
   const sorted = [...issues].sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
+  // preview: what Apply all would do, shown before anything changes.
+  const [preview, setPreview] = useState(null);
+  // done: what the last fix changed, with Undo.
+  const [done, setDone] = useState(null);
+  const showPreview = () => {
+    const after = applyAllFixes(mod);
+    setDone(null);
+    setPreview({ after, fixes: fixable, changes: describeChanges(mod, after) });
+  };
+  const apply = (after, label) => {
+    setDone({ before: mod, label, changes: describeChanges(mod, after) });
+    setPreview(null);
+    update(after);
+  };
   return (
     <div className="stack">
       <div className="summary-bar">
@@ -208,15 +240,42 @@ function ChecksTab({ mod, issues, update }) {
           <Counts issues={issues} />
           <p className="muted small">{issues.length ? `${issues.length} finding${issues.length === 1 ? '' : 's'} from hakchi's install rules.` : 'No problems found against hakchi\'s install rules.'}</p>
         </div>
-        {fixable.length > 0 && (
-          <button className="btn btn-primary" onClick={() => update(applyAllFixes(mod))}>Apply {fixable.length} automatic fix{fixable.length === 1 ? '' : 'es'}</button>
+        {fixable.length > 0 && !preview && (
+          <button className="btn btn-primary" onClick={showPreview}>Review {fixable.length} automatic fix{fixable.length === 1 ? '' : 'es'}</button>
         )}
       </div>
+      {preview && (
+        <div className="panel stack fix-panel">
+          <h3>{preview.fixes.length === 1 ? 'This fix' : `These ${preview.fixes.length} fixes`} will be applied</h3>
+          <ul className="fix-list">
+            {preview.fixes.map((f) => (
+              <li key={f.id}><strong>{f.fixLabel}</strong> <span className="muted small">for “{f.title}”</span><br /><span className="small">{FIX_DESCRIPTIONS[f.id] || f.detail}</span></li>
+            ))}
+          </ul>
+          <span className="eyebrow">What changes in the package</span>
+          <ChangeList changes={preview.changes} />
+          <p className="muted small">Nothing is changed on your computer: the fixes apply to the copy here, and you can undo them afterwards.</p>
+          <div className="row">
+            <button className="btn btn-primary" onClick={() => apply(preview.after, `${preview.fixes.length} automatic fix${preview.fixes.length === 1 ? '' : 'es'}`)}>Apply {preview.fixes.length === 1 ? 'it' : 'them'}</button>
+            <button className="btn btn-quiet" onClick={() => setPreview(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {done && (
+        <div className="callout callout-ok stack">
+          <strong>Applied {done.label}. {done.changes.length ? `${done.changes.length} change${done.changes.length === 1 ? '' : 's'}:` : 'No files changed.'}</strong>
+          {done.changes.length > 0 && <ChangeList changes={done.changes} />}
+          <div className="row">
+            <button className="btn btn-small" onClick={() => { update(done.before); setDone(null); }}>Undo</button>
+            <button className="linkish small" onClick={() => setDone(null)}>Dismiss</button>
+          </div>
+        </div>
+      )}
       {sorted.length > 0 ? (
         <ul className="issues">
           {sorted.map((i) => (
             <Issue key={i.id} issue={i}
-              onFix={(id) => update(applyFix(mod, id))}
+              onFix={(id) => apply(applyFix(mod, id), `“${i.fixLabel}”`)}
               onDismiss={(id) => update({ ...mod, dismissed: [...(mod.dismissed || []), id] })} />
           ))}
         </ul>
